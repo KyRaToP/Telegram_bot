@@ -1,8 +1,9 @@
 import aiosqlite
+from typing import Optional, List, Dict, Any
 
 DATABASE_NAME = 'tasks.db'
 
-async def init_db():
+async def init_db() -> None:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -23,29 +24,29 @@ async def init_db():
         ''')
         await db.commit()
 
-async def add_user(user_id, username):
+async def add_user(user_id: int, username: str) -> None:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute('INSERT INTO users (user_id, username, registered_at) VALUES (?, ?, datetime("now"))', (user_id, username))
         await db.commit()
 
-async def get_user(user_id):
+async def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-async def add_task(user_id, title, description, due_time):
+async def add_task(user_id: int, title: str, description: str, due_time: str) -> None:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute('INSERT INTO tasks (user_id, title, description, due_time) VALUES (?, ?, ?, ?)', (user_id, title, description, due_time))
         await db.commit()
 
-async def get_user_tasks(user_id):
+async def get_user_tasks(user_id: int) -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute('SELECT * FROM tasks WHERE user_id = ?', (user_id,))
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-async def update_task(task_id, title=None, description=None, due_time=None):
+async def update_task(task_id: int, title: Optional[str] = None, description: Optional[str] = None, due_time: Optional[str] = None) -> None:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         updates = []
         params = []
@@ -64,7 +65,7 @@ async def update_task(task_id, title=None, description=None, due_time=None):
             await db.execute(f'UPDATE tasks SET {set_clause} WHERE id = ?', params + [task_id])
             await db.commit()
 
-async def delete_task(task_id):
+async def delete_task(task_id: int) -> None:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
         await db.commit()
