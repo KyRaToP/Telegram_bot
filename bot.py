@@ -10,6 +10,7 @@ from aiogram.types import Message
 from database import init_db
 from middlewares import DbMiddleware
 from handlers import router as tasks_router  # Импортируем роутер из handlers.py
+from scheduler import start_scheduler  # Импортируем функцию для запуска планировщика
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -32,7 +33,13 @@ async def cmd_start(message: Message) -> None:
 
 async def main() -> None:
     logger.info("Запуск бота...")
+    
+    # Инициализируем базу данных
     await init_db()
+    
+    # Запускаем планировщик напоминаний
+    start_scheduler()
+    logger.info("✅ Планировщик запущен.")
     
     # ПРОСТОЙ ЗАПУСК БЕЗ ЯВНОГО УКАЗАНИЯ ПРОКСИ
     # Karing в TUN-режиме сам перехватит этот трафик и направит его через Польшу

@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from states import TaskStates
 from database import add_task, get_user_tasks, delete_task, mark_task_completed
+from scheduler import schedule_reminder, remove_reminder  # Импортируем функции из scheduler.py
 
 router = Router()
 
@@ -40,13 +41,16 @@ async def process_time_valid(message: Message, state: FSMContext) -> None:
     due_time = (message.text or "").strip()
     user_id = message.from_user.id if message.from_user else 0
     
-    # add_task используется здесь, поэтому импорт больше не будет "неиспользуемым"
-    await add_task(
+    # Добавляем задачу в базу данных
+    task_id = await add_task(
         user_id=user_id,
         title=data.get("title", "Без названия"),
         description=data.get("description", "Без описания"),
         due_time=due_time
     )
+    
+    # Устанавливаем напоминание через планировщик
+    schedule_reminder(message.bot, user_id, task_id, data.get("title", "Без названия"), due_time)
     
     await state.clear()
     await message.answer(
@@ -124,6 +128,9 @@ async def callback_delete_task(callback: CallbackQuery) -> None:
         return
         
     task_id = int(callback.data.split(':')[1])
+    
+    # Удаляем напоминание из планировщика перед удалением задачи
+    remove_reminder(task_id)
     
     await delete_task(task_id)
     await callback.answer("🗑 Задача удалена!")
