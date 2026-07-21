@@ -9,6 +9,7 @@ from aiogram.types import Message
 
 from database import init_db
 from middlewares import DbMiddleware
+from handlers import router as tasks_router  # Импортируем роутер из handlers.py
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -40,7 +41,9 @@ async def main() -> None:
 
     dp = Dispatcher()
     dp.update.middleware(DbMiddleware())
-    dp.include_router(router)
+    
+    # Подключаем роутер из handlers.py
+    dp.include_router(tasks_router)
     
     logger.info("🚀 Бот успешно запущен и готов к работе!")
     
