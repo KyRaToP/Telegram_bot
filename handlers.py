@@ -1,33 +1,94 @@
-# === ИМПОРТЫ (Bot удален, так как понадобится только на Этапе 5) ===
+# =========================================================================
+# handlers.py — Обработчики команд Telegram-бота для планирования задач
+# =========================================================================
+
+# === ИМПОРТЫ ===
+# Router, F — основа маршрутизации и фильтров aiogram 3
 from aiogram import Router, F
+
+# Message, CallbackQuery — типы событий от Telegram
 from aiogram.types import Message, CallbackQuery
+
+# Command — фильтр для текстовых команд (/add, /tasks и т.д.)
 from aiogram.filters import Command
+
+# FSMContext — контекст конечного автомата состояний (хранит промежуточные данные)
 from aiogram.fsm.context import FSMContext
+
+# InlineKeyboardBuilder — конструктор Inline-клавиатур (ПРАВИЛЬНЫЙ путь импорта!)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+# Наши модули
 from states import TaskStates
 from database import add_task, get_user_tasks, delete_task, mark_task_completed
-from scheduler import schedule_reminder, remove_reminder  # Импортируем функции из scheduler.py
+from scheduler import schedule_reminder, remove_reminder
 
+# Создаём роутер на верхнем уровне файла
+# (чтобы Pylance не ругался на reportUnusedFunction)
 router = Router()
 
+
 # =========================================================================
-# ЭТАП 3: FSM ДЛЯ ДОБАВЛЕНИЯ ЗАДАЧ
+# КОМАНДА /restart — СБРОС СОСТОЯНИЯ И ВОЗВРАТ В ГЛАВНОЕ МЕНЮ
+# =========================================================================
+
+@router.message(Command("restart"))
+async def cmd_restart(message: Message, state: FSMContext) -> None:
+    """
+    Полностью сбрасывает состояние FSM пользователя.
+    Полезно, если пользователь застрял в середине ввода задачи
+    или хочет начать взаимодействие с ботом заново.
+    """
+    # Получаем текущее состояние, чтобы понять, был ли пользователь в процессе ввода
+    current_state = await state.get_state()
+
+    # Очищаем FSM: удаляем все накопленные данные (title, description) и состояние
+    await state.clear()
+
+    # Формируем ответ в зависимости от того, было ли активное состояние
+    if current_state is not None:
+        await message.answer(
+            "🔄 Состояние сброшено!\n"
+            "Все незавершённые действия отменены.\n\n"
+            "⬇️ Выберите команду из меню ниже:"
+        )
+    else:
+        await message.answer("🔄 Добро пожаловать обратно!")
+
+    # Отправляем главное меню с описанием команд
+    await message.answer(
+        "🤖 <b>Я бот для планирования задач.</b>\n\n"
+        "📋 <b>Доступные команды:</b>\n"
+        "/add — ➕ добавить новую задачу\n"
+        "/tasks — 📝 посмотреть список задач\n"
+        "/restart — 🔄 перезапустить (сбросить состояние)\n",
+        parse_mode="HTML"
+    )
+
+
+# =========================================================================
+# ЭТАП 3: FSM ДЛЯ ПОШАГОВОГО ДОБАВЛЕНИЯ ЗАДАЧ
 # =========================================================================
 
 @router.message(Command("add"))
 async def cmd_add_task(message: Message, state: FSMContext) -> None:
+    """Начинает процесс создания новой задачи. Переводит FSM в ожидание названия."""
     await state.set_state(TaskStates.waiting_for_title)
     await message.answer("📝 Введите название задачи:")
 
+
 @router.message(TaskStates.waiting_for_title, F.text)
 async def process_title(message: Message, state: FSMContext) -> None:
+    """Сохраняет введённое название в FSM и запрашивает описание."""
+    # Безопасное извлечение текста: если message.text вдруг None, используем ""
     await state.update_data(title=(message.text or "").strip())
     await state.set_state(TaskStates.waiting_for_description)
     await message.answer("📄 Введите описание задачи:")
 
+
 @router.message(TaskStates.waiting_for_description, F.text)
 async def process_description(message: Message, state: FSMContext) -> None:
+    """Сохраняет введённое описание в FSM и запрашивает время выполнения."""
     await state.update_data(description=(message.text or "").strip())
     await state.set_state(TaskStates.waiting_for_time)
     await message.answer(
@@ -35,107 +96,180 @@ async def process_description(message: Message, state: FSMContext) -> None:
         "Пример: 25.12.2024 15:30"
     )
 
-@router.message(TaskStates.waiting_for_time, F.text.regexp(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$"))
+
+@router.message(
+    TaskStates.waiting_for_time,
+    F.text.regexp(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$")
+)
 async def process_time_valid(message: Message, state: FSMContext) -> None:
+    """
+    Обрабатывает корректно введённое время (формат ДД.ММ.ГГГГ ЧЧ:ММ).
+    Сохраняет задачу в БД, ставит напоминание в планировщик, очищает FSM.
+    """
+    # Извлекаем накопленные данные из FSM
     data = await state.get_data()
-    due_time = (message.text or "").strip()
-    user_id = message.from_user.id if message.from_user else 0
-    
-    # Добавляем задачу в базу данных
-    task_id = await add_task(
+
+    # Безопасное извлечение текста времени
+    due_time: str = (message.text or "").strip()
+
+    # Безопасное извлечение ID пользователя (защита от None)
+    user_id: int = message.from_user.id if message.from_user else 0
+
+    # 1. Сохраняем задачу в базу данных и получаем её ID
+    task_id: int = await add_task(
         user_id=user_id,
         title=data.get("title", "Без названия"),
         description=data.get("description", "Без описания"),
         due_time=due_time
     )
-    
-    # Устанавливаем напоминание через планировщик
-    schedule_reminder(message.bot, user_id, task_id, data.get("title", "Без названия"), due_time)
-    
+
+    # 2. Ставим напоминание в планировщик
+    #    Проверка `if message.bot` защищает от ошибки reportArgumentType,
+    #    так как message.bot имеет тип Bot | None
+    if message.bot:
+        schedule_reminder(
+            bot=message.bot,
+            user_id=user_id,
+            task_id=task_id,
+            title=data.get("title", "Без названия"),
+            run_time_str=due_time
+        )
+
+    # 3. Очищаем состояние FSM — процесс создания завершён
     await state.clear()
+
+    # 4. Подтверждаем пользователю
     await message.answer(
         f"✅ Задача успешно добавлена!\n"
-        f"📝 Название: {data.get('title')}\n"
-        f"⏰ Время: {due_time}"
+        f"📝 Название: {data.get('title', 'Без названия')}\n"
+        f"⏰ Время: {due_time}\n"
+        f"🔔 Напоминание установлено!"
     )
+
 
 @router.message(TaskStates.waiting_for_time, F.text)
 async def process_time_invalid(message: Message) -> None:
+    """
+    Срабатывает, если введённый текст НЕ соответствует формату ДД.ММ.ГГГГ ЧЧ:ММ.
+    Не меняет состояние FSM — пользователь остаётся в waiting_for_time.
+    """
     await message.answer(
         "❌ Неверный формат времени!\n"
         "Пожалуйста, введите время в формате ДД.ММ.ГГГГ ЧЧ:ММ\n"
         "Пример: 25.12.2024 15:30"
     )
 
+
 # =========================================================================
-# ЭТАП 4: ПРОСМОТР И УПРАВЛЕНИЕ ЗАДАЧАМИ
+# ЭТАП 4: ПРОСМОТР ЗАДАЧ С INLINE-КНОПКАМИ
 # =========================================================================
 
 @router.message(Command("tasks"))
 async def cmd_show_tasks(message: Message) -> None:
-    """Показывает список задач пользователя с Inline-кнопками."""
-    user_id = message.from_user.id if message.from_user else 0
+    """Показывает список задач пользователя с кнопками управления."""
+    # Безопасное получение ID
+    user_id: int = message.from_user.id if message.from_user else 0
+
+    # Получаем задачи из БД
     tasks = await get_user_tasks(user_id)
-    
+
+    # Если задач нет — сообщаем и выходим
     if not tasks:
-        await message.answer("📋 У вас пока нет задач. Используйте /add, чтобы создать первую!")
-        return
-    
-    tasks_text = "📋 Ваши задачи:\n\n"
-    keyboard = InlineKeyboardBuilder()
-    
-    for task in tasks:
-        tasks_text += (
-            f"📌 ID: {task['id']}\n"
-            f"📝 {(task['title'] or 'Без названия')}\n"
-            f"⏰ {task['due_time']}\n\n"
+        await message.answer(
+            "📋 У вас пока нет задач.\n"
+            "Используйте /add, чтобы создать первую!"
         )
-        
-        title_short = (task['title'] or "Задача")[:15]
-        
-        keyboard.button(text=f"✅ {title_short}", callback_data=f"done:{task['id']}")
-        keyboard.button(text=f"🗑 {title_short}", callback_data=f"del:{task['id']}")
-        keyboard.adjust(2)
-    
-    await message.answer(tasks_text, reply_markup=keyboard.as_markup())
+        return
+
+    # Формируем текст списка
+    tasks_text: str = "📋 <b>Ваши задачи:</b>\n\n"
+
+    # Создаём билдер клавиатуры
+    keyboard = InlineKeyboardBuilder()
+
+    for task in tasks:
+        # Добавляем информацию о задаче в текст
+        tasks_text += (
+            f"📌 <b>ID:</b> {task['id']}\n"
+            f"📝 {(task['title'] or 'Без названия')}\n"
+            f"📄 {(task['description'] or '—')}\n"
+            f"⏰ {task['due_time']}\n"
+            f"{'✅ Выполнена' if task['is_completed'] else '⏳ Активна'}\n\n"
+        )
+
+        # Обрезаем название до 15 символов для аккуратных кнопок
+        title_short: str = (task['title'] or "Задача")[:15]
+
+        # Кнопка "Выполнено" с callback_data в формате "done:{id}"
+        keyboard.button(
+            text=f"✅ {title_short}",
+            callback_data=f"done:{task['id']}"
+        )
+        # Кнопка "Удалить" с callback_data в формате "del:{id}"
+        keyboard.button(
+            text=f"🗑 {title_short}",
+            callback_data=f"del:{task['id']}"
+        )
+
+    # Размещаем по 2 кнопки в ряд
+    keyboard.adjust(2)
+
+    # Отправляем сообщение с прикреплённой клавиатурой
+    await message.answer(tasks_text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
 
 
-@router.callback_query(F.callback_data.regexp(r'^done:(\d+)$'))
+# =========================================================================
+# ЭТАП 4: CALLBACK-ОБРАБОТЧИКИ ДЛЯ КНОПОК
+# =========================================================================
+
+@router.callback_query(F.callback_data.regexp(r"^done:(\d+)$"))
 async def callback_mark_done(callback: CallbackQuery) -> None:
-    """Отмечает задачу как выполненную."""
-    # 1. БЕЗОПАСНАЯ ПРОВЕРКА: защищаемся от callback.data == None
+    """Отмечает задачу как выполненную по нажатию кнопки ✅."""
+    # 1. Защита: callback.data теоретически может быть None
     if not callback.data:
         await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
         return
-        
-    task_id = int(callback.data.split(':')[1])
-    
+
+    # 2. Безопасно извлекаем ID задачи из строки "done:123"
+    task_id: int = int(callback.data.split(":")[1])
+
+    # 3. Обновляем статус в БД
     await mark_task_completed(task_id)
+
+    # 4. Убираем "часики" у кнопки в Telegram
     await callback.answer("✅ Задача выполнена!")
-    
-    # 2. БЕЗОПАСНОЕ УДАЛЕНИЕ: isinstance сужает тип до Message, у которого точно есть .delete()
+
+    # 5. Безопасное удаление сообщения:
+    #    isinstance гарантирует Pylance, что у объекта есть метод .delete()
+    #    (исключает InaccessibleMessage)
     if callback.message and isinstance(callback.message, Message):
         await callback.message.delete()
         await callback.message.answer(f"✅ Задача #{task_id} отмечена как выполненная!")
 
 
-@router.callback_query(F.callback_data.regexp(r'^del:(\d+)$'))
+@router.callback_query(F.callback_data.regexp(r"^del:(\d+)$"))
 async def callback_delete_task(callback: CallbackQuery) -> None:
-    """Удаляет задачу."""
-    # 1. БЕЗОПАСНАЯ ПРОВЕРКА: защищаемся от callback.data == None
+    """Удаляет задачу и отменяет её напоминание по нажатию кнопки 🗑."""
+    # 1. Защита: callback.data теоретически может быть None
     if not callback.data:
         await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
         return
-        
-    task_id = int(callback.data.split(':')[1])
-    
-    # Удаляем напоминание из планировщика перед удалением задачи
+
+    # 2. Безопасно извлекаем ID задачи из строки "del:123"
+    task_id: int = int(callback.data.split(":")[1])
+
+    # 3. СНАЧАЛА удаляем напоминание из планировщика (Этап 5)
+    #    Это нужно сделать ДО удаления из БД, чтобы планировщик не пытался
+    #    отправить сообщение по уже несуществующей задаче
     remove_reminder(task_id)
-    
+
+    # 4. ЗАТЕМ удаляем задачу из базы данных
     await delete_task(task_id)
+
+    # 5. Убираем "часики" у кнопки
     await callback.answer("🗑 Задача удалена!")
-    
-    # 2. БЕЗОПАСНОЕ УДАЛЕНИЕ
+
+    # 6. Безопасное удаление сообщения
     if callback.message and isinstance(callback.message, Message):
         await callback.message.delete()
         await callback.message.answer(f"🗑 Задача #{task_id} успешно удалена!")
