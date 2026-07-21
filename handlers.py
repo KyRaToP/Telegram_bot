@@ -1,5 +1,5 @@
 from aiogram import Router, Message, FSMContext
-from aiogram.filters import Command, F
+from aiogram.filters import Command, Text
 from aiogram.fsm.state import State
 
 from states import TaskStates
@@ -38,7 +38,7 @@ async def handle_waiting_for_description(message: Message, state: FSMContext) ->
     await message.answer("Введите время выполнения задачи (в формате HH:MM):")
     await state.set_state(TaskStates.waiting_for_time)
 
-@router.message(state=TaskStates.waiting_for_time, F.text.regexp(r"^\d{2}:\d{2}$"))
+@router.message(state=TaskStates.waiting_for_time, Text(regexp=r"^\d{2}:\d{2}$"))
 async def handle_waiting_for_time_valid(message: Message, state: FSMContext) -> None:
     """
     Обработчик для состояния waiting_for_time с валидацией формата времени.
