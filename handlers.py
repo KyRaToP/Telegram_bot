@@ -1,63 +1,70 @@
-from aiogram import Router, Message, FSMContext
-from aiogram.filters import Command, Text
-from aiogram.fsm.state import State
+# === ИМПОРТЫ (Bot удален, так как не используется) ===
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 
 from states import TaskStates
 from database import add_task
 
+# Создаем роутер на верхнем уровне
 router = Router()
 
+# 1. Обработчик команды /add
 @router.message(Command("add"))
-async def cmd_add(message: Message, state: FSMContext) -> None:
-    """
-    Обработчик команды /add. Начинает процесс создания задачи,
-    переходя в состояние waiting_for_title.
-    """
-    await message.answer("Введите название задачи:")
+async def cmd_add_task(message: Message, state: FSMContext) -> None:
     await state.set_state(TaskStates.waiting_for_title)
+    await message.answer("📝 Введите название задачи:")
 
-@router.message(state=TaskStates.waiting_for_title)
-async def handle_waiting_for_title(message: Message, state: FSMContext) -> None:
-    """
-    Обработчик для состояния waiting_for_title. Сохраняет введенное название задачи
-    и переход к следующему состоянию - waiting_for_description.
-    """
-    title = message.text.strip()
-    await state.update_data(title=title)
-    await message.answer("Введите описание задачи:")
+# 2. Обработчик ожидания названия
+@router.message(TaskStates.waiting_for_title, F.text)
+async def process_title(message: Message, state: FSMContext) -> None:
+    # БЕЗОПАСНОЕ ИЗВЛЕЧЕНИЕ: (message.text or "") гарантирует, что это строка
+    await state.update_data(title=(message.text or "").strip())
     await state.set_state(TaskStates.waiting_for_description)
+    await message.answer("📄 Введите описание задачи:")
 
-@router.message(state=TaskStates.waiting_for_description)
-async def handle_waiting_for_description(message: Message, state: FSMContext) -> None:
-    """
-    Обработчик для состояния waiting_for_description. Сохраняет введенное описание задачи
-    и переход к следующему состоянию - waiting_for_time.
-    """
-    description = message.text.strip()
-    await state.update_data(description=description)
-    await message.answer("Введите время выполнения задачи (в формате HH:MM):")
+# 3. Обработчик ожидания описания
+@router.message(TaskStates.waiting_for_description, F.text)
+async def process_description(message: Message, state: FSMContext) -> None:
+    await state.update_data(description=(message.text or "").strip())
     await state.set_state(TaskStates.waiting_for_time)
+    await message.answer(
+        "⏰ Введите время выполнения задачи в формате ДД.ММ.ГГГГ ЧЧ:ММ\n"
+        "Пример: 25.12.2024 15:30"
+    )
 
-@router.message(state=TaskStates.waiting_for_time, Text(regexp=r"^\d{2}:\d{2}$"))
-async def handle_waiting_for_time_valid(message: Message, state: FSMContext) -> None:
-    """
-    Обработчик для состояния waiting_for_time с валидацией формата времени.
-    Сохраняет задачу в базе данных и очищает состояние FSM.
-    """
-    due_time = message.text.strip()
+# 4. Обработчик ожидания времени (ВАЛИДНЫЙ ФОРМАТ)
+@router.message(TaskStates.waiting_for_time, F.text.regexp(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$"))
+async def process_time_valid(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    user_id = message.from_user.id
-    title = data["title"]
-    description = data["description"]
-
-    task_id = await add_task(user_id, title, description, due_time)
-    await message.answer(f"Задача успешно создана! ID задачи: {task_id}")
+    
+    # Безопасное извлечение текста
+    due_time = (message.text or "").strip()
+    
+    # Безопасное извлечение ID пользователя (защита от None)
+    user_id = message.from_user.id if message.from_user else 0
+    
+    # Вызываем функцию добавления задачи (без присваивания неиспользуемой переменной)
+    await add_task(
+        user_id=user_id,
+        title=data.get("title", "Без названия"),
+        description=data.get("description", "Без описания"),
+        due_time=due_time
+    )
+    
     await state.clear()
+    await message.answer(
+        f"✅ Задача успешно добавлена!\n"
+        f"📝 Название: {data.get('title')}\n"
+        f"⏰ Время: {due_time}"
+    )
 
-@router.message(state=TaskStates.waiting_for_time)
-async def handle_waiting_for_time_invalid(message: Message) -> None:
-    """
-    Обработчик для состояния waiting_for_time без валидации формата времени.
-    Просит пользователя ввести время выполнения задачи заново.
-    """
-    await message.answer("Неверный формат времени. Введите время в формате HH:MM (например, 14:30):")
+# 5. Обработчик ожидания времени (НЕВАЛИДНЫЙ ФОРМАТ)
+@router.message(TaskStates.waiting_for_time, F.text)
+async def process_time_invalid(message: Message) -> None:
+    await message.answer(
+        "❌ Неверный формат времени!\n"
+        "Пожалуйста, введите время в формате ДД.ММ.ГГГГ ЧЧ:ММ\n"
+        "Пример: 25.12.2024 15:30"
+    )
