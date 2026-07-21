@@ -1,33 +1,53 @@
+import asyncio
+import logging
 import os
-from aiogram import Bot, Dispatcher, types
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from middlewares import DbMiddleware
+
 from database import init_db
+from middlewares import DbMiddleware
 
-# Загружаем токен из переменной окружения
-API_TOKEN = os.getenv('BOT_TOKEN')
+logging.basicConfig(
+    level=logging.INFO, 
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-# Создаем экземпляры Bot и Dispatcher
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+# ЖЕСТКАЯ загрузка токена (Pylance доволен)
+load_dotenv()
+try:
+    BOT_TOKEN = os.environ["BOT_TOKEN"]
+except KeyError:
+    raise ValueError("КРИТИЧЕСКАЯ ОШИБКА: Переменная BOT_TOKEN не найдена в файле .env!")
 
-# Подключаем middleware
-dp.message.middleware.register(DbMiddleware())
+router = Router()
 
-# Простой хендлер на команду /start
-@dp.message(Command("start"))
-async def command_start(message: Message) -> None:
-    await message.answer("Привет! Я твой планировщик задач.")
+@router.message(Command("start"))
+async def cmd_start(message: Message) -> None:
+    await message.answer("Привет! Я твой планировщик задач. Используй /add, чтобы создать задачу.")
 
-# Функция main для запуска бота
 async def main() -> None:
-    # Инициализируем базу данных
+    logger.info("Запуск бота...")
     await init_db()
     
-    # Запускаем поллинг бота
-    await dp.start_polling(bot)
+    # ПРОСТОЙ ЗАПУСК БЕЗ ЯВНОГО УКАЗАНИЯ ПРОКСИ
+    # Karing в TUN-режиме сам перехватит этот трафик и направит его через Польшу
+    bot = Bot(token=BOT_TOKEN)
+    logger.info("✅ Бот инициализирован (используется системный маршрут Karing)")
+
+    dp = Dispatcher()
+    dp.update.middleware(DbMiddleware())
+    dp.include_router(router)
+    
+    logger.info("🚀 Бот успешно запущен и готов к работе!")
+    
+    try:
+        await dp.start_polling(bot)  # type: ignore
+    except Exception as e:
+        logger.error(f"Ошибка при запуске polling: {e}")
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
