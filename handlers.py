@@ -1,30 +1,30 @@
-# === ИМПОРТЫ (Bot удален, так как не используется) ===
+# === ИМПОРТЫ (Bot удален, так как понадобится только на Этапе 5) ===
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardBuilder
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from states import TaskStates
-from database import add_task, get_user_tasks, mark_task_completed, delete_task
+from database import add_task, get_user_tasks, delete_task, mark_task_completed
 
-# Создаем роутер на верхнем уровне
 router = Router()
 
-# 1. Обработчик команды /add
+# =========================================================================
+# ЭТАП 3: FSM ДЛЯ ДОБАВЛЕНИЯ ЗАДАЧ
+# =========================================================================
+
 @router.message(Command("add"))
 async def cmd_add_task(message: Message, state: FSMContext) -> None:
     await state.set_state(TaskStates.waiting_for_title)
     await message.answer("📝 Введите название задачи:")
 
-# 2. Обработчик ожидания названия
 @router.message(TaskStates.waiting_for_title, F.text)
 async def process_title(message: Message, state: FSMContext) -> None:
-    # БЕЗОПАСНОЕ ИЗВЛЕЧЕНИЕ: (message.text or "") гарантирует, что это строка
     await state.update_data(title=(message.text or "").strip())
     await state.set_state(TaskStates.waiting_for_description)
     await message.answer("📄 Введите описание задачи:")
 
-# 3. Обработчик ожидания описания
 @router.message(TaskStates.waiting_for_description, F.text)
 async def process_description(message: Message, state: FSMContext) -> None:
     await state.update_data(description=(message.text or "").strip())
@@ -34,18 +34,13 @@ async def process_description(message: Message, state: FSMContext) -> None:
         "Пример: 25.12.2024 15:30"
     )
 
-# 4. Обработчик ожидания времени (ВАЛИДНЫЙ ФОРМАТ)
 @router.message(TaskStates.waiting_for_time, F.text.regexp(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$"))
 async def process_time_valid(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    
-    # Безопасное извлечение текста
     due_time = (message.text or "").strip()
-    
-    # Безопасное извлечение ID пользователя (защита от None)
     user_id = message.from_user.id if message.from_user else 0
     
-    # Вызываем функцию добавления задачи (без присваивания неиспользуемой переменной)
+    # add_task используется здесь, поэтому импорт больше не будет "неиспользуемым"
     await add_task(
         user_id=user_id,
         title=data.get("title", "Без названия"),
@@ -60,7 +55,6 @@ async def process_time_valid(message: Message, state: FSMContext) -> None:
         f"⏰ Время: {due_time}"
     )
 
-# 5. Обработчик ожидания времени (НЕВАЛИДНЫЙ ФОРМАТ)
 @router.message(TaskStates.waiting_for_time, F.text)
 async def process_time_invalid(message: Message) -> None:
     await message.answer(
@@ -69,59 +63,72 @@ async def process_time_invalid(message: Message) -> None:
         "Пример: 25.12.2024 15:30"
     )
 
-# 6. Обработчик команды /tasks
+# =========================================================================
+# ЭТАП 4: ПРОСМОТР И УПРАВЛЕНИЕ ЗАДАЧАМИ
+# =========================================================================
+
 @router.message(Command("tasks"))
-async def cmd_tasks(message: Message) -> None:
+async def cmd_show_tasks(message: Message) -> None:
+    """Показывает список задач пользователя с Inline-кнопками."""
     user_id = message.from_user.id if message.from_user else 0
     tasks = await get_user_tasks(user_id)
     
     if not tasks:
-        await message.answer("Задач нет.")
+        await message.answer("📋 У вас пока нет задач. Используйте /add, чтобы создать первую!")
         return
     
-    text = "Ваши задачи:\n"
+    tasks_text = "📋 Ваши задачи:\n\n"
     keyboard = InlineKeyboardBuilder()
     
     for task in tasks:
-        text += f"ID: {task['id']}\n"
-        text += f"Название: {task['title']}\n"
-        text += f"Описание: {task['description']}\n"
-        text += f"Время выполнения: {task['due_time']}\n\n"
+        tasks_text += (
+            f"📌 ID: {task['id']}\n"
+            f"📝 {(task['title'] or 'Без названия')}\n"
+            f"⏰ {task['due_time']}\n\n"
+        )
         
-        keyboard.button(text="✅", callback_data=f"done:{task['id']}")
-        keyboard.button(text="🗑", callback_data=f"del:{task['id']}")
-        keyboard.row()
+        title_short = (task['title'] or "Задача")[:15]
+        
+        keyboard.button(text=f"✅ {title_short}", callback_data=f"done:{task['id']}")
+        keyboard.button(text=f"🗑 {title_short}", callback_data=f"del:{task['id']}")
+        keyboard.adjust(2)
     
-    await message.answer(text, reply_markup=keyboard.as_markup())
+    await message.answer(tasks_text, reply_markup=keyboard.as_markup())
 
-# 7. Callback-хендлер для "done:"
-@router.callback_query(F.data.regexp(r'^done:(\d+)$'))
-async def handle_done(callback: CallbackQuery) -> None:
-    match = F.data.regexp(r'^done:(\d+)$').match(callback.data)
-    if not match:
-        await callback.answer("Ошибка в обработке задачи.")
+
+@router.callback_query(F.callback_data.regexp(r'^done:(\d+)$'))
+async def callback_mark_done(callback: CallbackQuery) -> None:
+    """Отмечает задачу как выполненную."""
+    # 1. БЕЗОПАСНАЯ ПРОВЕРКА: защищаемся от callback.data == None
+    if not callback.data:
+        await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
         return
+        
+    task_id = int(callback.data.split(':')[1])
     
-    task_id = int(match.group(1))
     await mark_task_completed(task_id)
-    await callback.answer("Задача отмечена как выполненная.")
+    await callback.answer("✅ Задача выполнена!")
     
-    # Удаляем сообщение, если оно существует
-    if callback.message:
+    # 2. БЕЗОПАСНОЕ УДАЛЕНИЕ: isinstance сужает тип до Message, у которого точно есть .delete()
+    if callback.message and isinstance(callback.message, Message):
         await callback.message.delete()
+        await callback.message.answer(f"✅ Задача #{task_id} отмечена как выполненная!")
 
-# 8. Callback-хендлер для "del:"
-@router.callback_query(F.data.regexp(r'^del:(\d+)$'))
-async def handle_delete(callback: CallbackQuery) -> None:
-    match = F.data.regexp(r'^del:(\d+)$').match(callback.data)
-    if not match:
-        await callback.answer("Ошибка в обработке задачи.")
+
+@router.callback_query(F.callback_data.regexp(r'^del:(\d+)$'))
+async def callback_delete_task(callback: CallbackQuery) -> None:
+    """Удаляет задачу."""
+    # 1. БЕЗОПАСНАЯ ПРОВЕРКА: защищаемся от callback.data == None
+    if not callback.data:
+        await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
         return
+        
+    task_id = int(callback.data.split(':')[1])
     
-    task_id = int(match.group(1))
     await delete_task(task_id)
-    await callback.answer("Задача удалена.")
+    await callback.answer("🗑 Задача удалена!")
     
-    # Удаляем сообщение, если оно существует
-    if callback.message:
+    # 2. БЕЗОПАСНОЕ УДАЛЕНИЕ
+    if callback.message and isinstance(callback.message, Message):
         await callback.message.delete()
+        await callback.message.answer(f"🗑 Задача #{task_id} успешно удалена!")
