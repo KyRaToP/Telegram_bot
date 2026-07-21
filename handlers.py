@@ -29,6 +29,33 @@ router = Router()
 
 
 # =========================================================================
+# ФУНКЦИЯ ДЛЯ ПОКАЗА ГЛАВНОГО МЕНЮ С КНОПКАМИ
+# =========================================================================
+
+def show_main_menu(message: Message) -> None:
+    """
+    Отправляет пользователю главное меню с Inline-кнопками для основных действий.
+    """
+    # Создаём билдер клавиатуры
+    keyboard = InlineKeyboardBuilder()
+
+    # Добавляем кнопки в столбик
+    keyboard.button(text="➕ Добавить задачу", callback_data="menu:add")
+    keyboard.button(text="📋 Мои задачи", callback_data="menu:tasks")
+    keyboard.button(text="📜 История задач", callback_data="menu:history")
+    keyboard.button(text="🔄 Перезапустить", callback_data="menu:restart")
+
+    # Один столбец
+    keyboard.adjust(1)
+
+    # Отправляем сообщение с прикреплённой клавиатурой
+    message.answer(
+        "👋 Привет! Я бот для планирования задач.\n\nВыбери действие из меню ниже:",
+        reply_markup=keyboard.as_markup()
+    )
+
+
+# =========================================================================
 # КОМАНДА /restart — СБРОС СОСТОЯНИЯ И ВОЗВРАТ В ГЛАВНОЕ МЕНЮ
 # =========================================================================
 
@@ -36,7 +63,7 @@ router = Router()
 async def cmd_restart(message: Message, state: FSMContext) -> None:
     """
     Полностью сбрасывает состояние FSM пользователя.
-    Полезно, если пользователь застрял в середине ввода задачи
+    Полезно, если пользователь застрял в процессе ввода задачи
     или хочет начать взаимодействие с ботом заново.
     """
     # Получаем текущее состояние, чтобы понять, был ли пользователь в процессе ввода
@@ -45,25 +72,21 @@ async def cmd_restart(message: Message, state: FSMContext) -> None:
     # Очищаем FSM: удаляем все накопленные данные (title, description) и состояние
     await state.clear()
 
-    # Формируем ответ в зависимости от того, было ли активное состояние
-    if current_state is not None:
-        await message.answer(
-            "🔄 Состояние сброшено!\n"
-            "Все незавершённые действия отменены.\n\n"
-            "⬇️ Выберите команду из меню ниже:"
-        )
-    else:
-        await message.answer("🔄 Добро пожаловать обратно!")
+    # Отправляем главное меню с кнопками
+    show_main_menu(message)
 
-    # Отправляем главное меню с описанием команд
-    await message.answer(
-        "🤖 <b>Я бот для планирования задач.</b>\n\n"
-        "📋 <b>Доступные команды:</b>\n"
-        "/add — ➕ добавить новую задачу\n"
-        "/tasks — 📝 посмотреть список задач\n"
-        "/restart — 🔄 перезапустить (сбросить состояние)\n",
-        parse_mode="HTML"
-    )
+
+# =========================================================================
+# КОМАНДА /start — НАЧАЛО РАБОТЫ С БОТОМ
+# =========================================================================
+
+@router.message(Command("start"))
+async def cmd_start(message: Message) -> None:
+    """
+    Приветствует пользователя и отправляет главное меню с кнопками.
+    """
+    # Отправляем главное меню с кнопками
+    show_main_menu(message)
 
 
 # =========================================================================
@@ -273,3 +296,67 @@ async def callback_delete_task(callback: CallbackQuery) -> None:
     if callback.message and isinstance(callback.message, Message):
         await callback.message.delete()
         await callback.message.answer(f"🗑 Задача #{task_id} успешно удалена!")
+
+
+# =========================================================================
+# CALLBACK-ОБРАБОТЧИКИ ДЛЯ КНОПОК ГЛАВНОГО МЕНЮ
+# =========================================================================
+
+@router.callback_query(F.callback_data == "menu:add")
+async def callback_menu_add(callback: CallbackQuery) -> None:
+    """Перенаправляет на FSM для добавления новой задачи."""
+    # Защита от None
+    if not callback.data:
+        await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
+        return
+
+    # Убираем "часики" у кнопки в Telegram
+    await callback.answer()
+
+    # Перенаправляем на FSM для добавления задачи
+    await cmd_add_task(callback.message, FSMContext())
+
+
+@router.callback_query(F.callback_data == "menu:tasks")
+async def callback_menu_tasks(callback: CallbackQuery) -> None:
+    """Показывает список задач пользователя."""
+    # Защита от None
+    if not callback.data:
+        await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
+        return
+
+    # Убираем "часики" у кнопки в Telegram
+    await callback.answer()
+
+    # Показываем список задач
+    await cmd_show_tasks(callback.message)
+
+
+@router.callback_query(F.callback_data == "menu:history")
+async def callback_menu_history(callback: CallbackQuery) -> None:
+    """Заглушка для истории задач."""
+    # Защита от None
+    if not callback.data:
+        await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
+        return
+
+    # Убираем "часики" у кнопки в Telegram
+    await callback.answer()
+
+    # Заглушка: отправляем сообщение о том, что эта функция пока не реализована
+    await callback.message.answer("🚧 История задач временно недоступна.")
+
+
+@router.callback_query(F.callback_data == "menu:restart")
+async def callback_menu_restart(callback: CallbackQuery) -> None:
+    """Сбрасывает состояние FSM и возвращает в главное меню."""
+    # Защита от None
+    if not callback.data:
+        await callback.answer("Ошибка: отсутствуют данные", show_alert=True)
+        return
+
+    # Убираем "часики" у кнопки в Telegram
+    await callback.answer()
+
+    # Сбрасываем состояние FSM и отправляем главное меню
+    await cmd_restart(callback.message, FSMContext())
