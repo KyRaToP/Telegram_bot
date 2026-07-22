@@ -1,68 +1,37 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram import Bot
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 from datetime import datetime
+import logging
 
-# Глобальный планировщик с временной зоной Москва
-scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+logger = logging.getLogger(__name__)
 
-def schedule_reminder(bot, user_id: int, task_id: int, title: str, run_time_str: str) -> None:
-    """
-    Парсит время выполнения задачи и добавляет джобу в планировщик.
-    
-    :param bot: Объект бота для отправки уведомлений
-    :param user_id: ID пользователя, которому будет отправлено уведомление
-    :param task_id: ID задачи
-    :param title: Название задачи
-    :param run_time_str: Время выполнения задачи в формате ДД.ММ.ГГГГ ЧЧ:ММ
-    """
+scheduler: AsyncIOScheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+
+async def send_reminder(bot: Bot, user_id: int, title: str) -> None:
+    await bot.send_message(chat_id=user_id, text=f"⏰ Напоминание: {title}")
+    logger.info(f"Отправлено напоминание пользователю {user_id}: {title}")
+
+def schedule_reminder(bot: Bot, user_id: int, task_id: int, title: str, run_time_str: str) -> None:
     try:
         run_time = datetime.strptime(run_time_str, "%d.%m.%Y %H:%M")
-        job_id = str(task_id)
-        
-        # Проверяем, существует ли уже джоба с таким ID
-        if scheduler.get_job(job_id):
-            scheduler.remove_job(job_id)
-        
-        # Добавляем новую задачу в планировщик
-        scheduler.add_job(
-            send_reminder,
+        scheduler.add_job(  # type: ignore
+            id=str(task_id),
+            func=send_reminder,
+            trigger='date',
             run_date=run_time,
-            args=(bot, user_id, task_id, title),
-            id=job_id
+            args=[bot, user_id, title]
         )
-    except ValueError:
-        print(f"Неверный формат времени: {run_time_str}")
-
-async def send_reminder(bot, user_id: int, task_id: int, title: str) -> None:
-    """
-    Отправляет уведомление пользователю о выполнении задачи.
-    
-    :param bot: Объект бота для отправки сообщения
-    :param user_id: ID пользователя, которому будет отправлено уведомление
-    :param task_id: ID задачи
-    :param title: Название задачи
-    """
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"Напоминание: выполните задачу \"{title}\"!"
-        )
-    except Exception as e:
-        print(f"Ошибка при отправке уведомления пользователю {user_id}: {e}")
+        logger.info(f"Напоминание запланировано для задачи #{task_id} на {run_time}")
+    except ValueError as e:
+        logger.error(f"Ошибка парсинга времени: {e}")
 
 def start_scheduler() -> None:
-    """
-    Запускает планировщик.
-    """
     scheduler.start()
+    logger.info("✅ Планировщик задач запущен")
 
 def remove_reminder(task_id: int) -> None:
-    """
-    Удаляет джобу из планировщика по ID задачи.
-    
-    :param task_id: ID задачи
-    """
-    job_id = str(task_id)
     try:
-        scheduler.remove_job(job_id)
-    except Exception as e:
-        print(f"Ошибка при удалении джобы {job_id}: {e}")
+        scheduler.remove_job(job_id=str(task_id))  # type: ignore
+        logger.info(f"Напоминание для задачи #{task_id} удалено")
+    except Exception:
+        pass
