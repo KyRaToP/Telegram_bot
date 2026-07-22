@@ -1,0 +1,38 @@
+# Виртуальное окружение Python
+venv/
+env/
+ENV/
+
+# Файлы с секретами (ТОКЕН БОТА!)
+.env
+
+# Файлы базы данных
+*.db
+*.sqlite
+*.sqlite3
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Файлы Aider
+.aider*
+.aider.tags.cache.v4/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Логи
+*.log
+
+# Временные файлы
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
