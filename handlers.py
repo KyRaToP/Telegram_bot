@@ -281,10 +281,10 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
     
-    hour_str = callback.data.split(":")[1]
+    hour_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     user_id = callback.from_user.id if callback.from_user else 0
-    
+
     selected_date = data.get("selected_date")
     if selected_date:
         due_time_str = f"{selected_date} {hour_str}"
@@ -297,7 +297,7 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_select_hour_today(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    hour_str = callback.data.split(":")[1]
+    hour_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     user_id = callback.from_user.id if callback.from_user else 0
     selected_date = data.get("selected_date")
@@ -309,7 +309,7 @@ async def cb_select_hour_today(callback: CallbackQuery, state: FSMContext) -> No
 async def cb_select_hour_tomorrow(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    hour_str = callback.data.split(":")[1]
+    hour_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     user_id = callback.from_user.id if callback.from_user else 0
     selected_date = data.get("selected_date")
