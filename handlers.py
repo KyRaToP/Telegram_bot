@@ -351,17 +351,8 @@ async def menu_restart(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     
     # ИСПРАВЛЕНИЕ: Ловим ошибку, если пользователь нажал "Перезапустить", находясь в главном меню
-    try:
-        await callback.message.edit_text(
-            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
-            reply_markup=get_main_menu_kb().as_markup(),
-            parse_mode="HTML"
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_tasks(user_id, callback.message)
 
 @router.callback_query(F.data == "menu:tasks")
 async def menu_tasks(callback: CallbackQuery) -> None:
@@ -385,7 +376,10 @@ async def menu_history(callback: CallbackQuery) -> None:
 async def cmd_show_tasks(user_id: int, message: Message) -> None:
     tasks = await get_user_tasks(user_id)
     if not tasks:
-        await message.answer("📋 Нет активных задач.")
+        await message.answer(
+            "📋 Нет активных задач.",
+            reply_markup=get_main_menu_kb().as_markup()
+        )
         return
     
     text = "📋 <b>Ваши задачи:</b>\n\n"
@@ -411,17 +405,8 @@ async def callback_toggle_task(callback: CallbackQuery) -> None:
         await callback.answer("✅ Выполнена!")
     else:
         await callback.answer("↩️ Возвращена!")
-    try:
-        await callback.message.edit_text(
-            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
-            reply_markup=get_main_menu_kb().as_markup(),
-            parse_mode="HTML"
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_tasks(user_id, callback.message)
 
 @router.callback_query(F.data.regexp(r"^tasks:del:(\d+)$"))
 async def callback_delete_task_active(callback: CallbackQuery) -> None:
@@ -431,23 +416,17 @@ async def callback_delete_task_active(callback: CallbackQuery) -> None:
     remove_reminder(task_id)
     await delete_task(task_id)
     await callback.answer("🗑 Удалена!")
-    try:
-        await callback.message.edit_text(
-            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
-            reply_markup=get_main_menu_kb().as_markup(),
-            parse_mode="HTML"
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_history(user_id, callback.message)
 
 
 async def cmd_show_history(user_id: int, message: Message) -> None:
     tasks = await get_completed_tasks(user_id)
     if not tasks:
-        await message.answer("📜 История пуста.")
+        await message.answer(
+            "📜 История пуста.",
+            reply_markup=get_main_menu_kb().as_markup()
+        )
         return
     text = "📜 <b>История:</b>\n\n"
     kb = InlineKeyboardBuilder()
@@ -467,17 +446,8 @@ async def callback_reactivate(callback: CallbackQuery) -> None:
     task_id = int(callback.data.split(":")[2])
     await reactivate_task(task_id)
     await callback.answer("↩️ Возвращена!")
-    try:
-        await callback.message.edit_text(
-            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
-            reply_markup=get_main_menu_kb().as_markup(),
-            parse_mode="HTML"
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_history(user_id, callback.message)
 
 @router.callback_query(F.data.regexp(r"^history:del:(\d+)$"))
 async def callback_delete_history(callback: CallbackQuery) -> None:
