@@ -506,7 +506,7 @@ async def callback_delete_task_active(callback: CallbackQuery) -> None:
     await delete_task(task_id)
     await callback.answer("🗑 Удалена!")
     user_id = callback.from_user.id if callback.from_user else 0
-    await cmd_show_history(user_id, callback.message)
+    await cmd_show_tasks(user_id, callback.message)
 
 
 async def cmd_show_history(user_id: int, message: Message) -> None:
