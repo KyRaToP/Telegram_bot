@@ -7,7 +7,7 @@ import calendar
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, MaybeInaccessibleMessage
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -118,7 +118,7 @@ async def cmd_restart(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "menu:restart")
 async def callback_restart(callback: CallbackQuery, state: FSMContext) -> None:
-    if not callback.data or not isinstance(callback.message, Message):
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
         return
     await callback.answer()
     await state.clear()
@@ -142,7 +142,8 @@ async def callback_restart(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "menu:add")
 async def menu_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not isinstance(callback.message, Message): return
+    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     await state.set_state(TaskStates.waiting_for_title)
     await callback.message.answer("📝 Введите название задачи:")
 
@@ -176,7 +177,8 @@ async def process_description(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data.regexp(r"^time:quick:(today|tomorrow|week)$"))
 async def cb_quick_time(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     
     choice = callback.data.split(":")[2]
     now = datetime.now()
@@ -195,7 +197,8 @@ async def cb_quick_time(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "time:quick:calendar")
 async def cb_open_calendar(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not isinstance(callback.message, Message): return
+    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     
     now = datetime.now()
     await state.update_data(cal_year=now.year, cal_month=now.month)
@@ -205,7 +208,8 @@ async def cb_open_calendar(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.regexp(r"^cal:(prev|next):(\d{4}):(\d{1,2})$"))
 async def cb_navigate_calendar(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     
     # ИСПРАВЛЕНИЕ: прямое преобразование в int, без создания year_str и month_str
     parts = callback.data.split(":")
@@ -233,7 +237,7 @@ async def cb_navigate_calendar(callback: CallbackQuery, state: FSMContext) -> No
 @router.callback_query(F.data.regexp(r"^cal:day:(\d{4}):(\d{1,2}):(\d{1,2})$"))
 async def cb_select_day(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): 
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
         return
     
     # ИСПРАВЛЕНИЕ: берем только день из конца строки, неиспользуемые переменные удалены
@@ -247,7 +251,8 @@ async def cb_select_day(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"))
 async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     
     hour_str = callback.data.split(":")[1]
     data = await state.get_data()
@@ -281,14 +286,16 @@ async def cmd_show_tasks(user_id: int, message: Message) -> None:
 @router.callback_query(F.data == "menu:tasks")
 async def menu_tasks(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not isinstance(callback.message, Message): return
+    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     user_id = callback.from_user.id if callback.from_user else 0
     await cmd_show_tasks(user_id, callback.message)
 
 @router.callback_query(F.data.regexp(r"^tasks:toggle:(\d+)$"))
 async def callback_toggle_task(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     is_completed = await toggle_task_status(task_id)
@@ -302,7 +309,8 @@ async def callback_toggle_task(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.regexp(r"^tasks:del:(\d+)$"))
 async def callback_delete_task_active(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     remove_reminder(task_id)
@@ -329,14 +337,16 @@ async def cmd_show_history(user_id: int, message: Message) -> None:
 @router.callback_query(F.data == "menu:history")
 async def menu_history(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not isinstance(callback.message, Message): return
+    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     user_id = callback.from_user.id if callback.from_user else 0
     await cmd_show_history(user_id, callback.message)
 
 @router.callback_query(F.data.regexp(r"^history:reactivate:(\d+)$"))
 async def callback_reactivate(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     await reactivate_task(task_id)
@@ -346,7 +356,8 @@ async def callback_reactivate(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.regexp(r"^history:del:(\d+)$"))
 async def callback_delete_history(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
+    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
+        return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     await delete_task(task_id)
