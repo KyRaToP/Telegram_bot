@@ -1,27 +1,8 @@
+# states.py
 from aiogram.fsm.state import StatesGroup, State
 
 class TaskStates(StatesGroup):
-    """
-    Класс для определения состояний конечного автомата (FSM) в боте.
-    Используется для управления процессом создания задачи пользователем.
-    """
-
     waiting_for_title = State()
-    """
-    Состояние, ожидание от пользователя ввода названия задачи.
-    """
-
     waiting_for_description = State()
-    """
-    Состояние, ожидание от пользователя ввода описания задачи.
-    """
-
-    waiting_for_calendar = State()
-    """
-    Состояние, ожидание от пользователя выбора даты из календаря.
-    """
-
-    waiting_for_hour = State()
-    """
-    Состояние, ожидание от пользователя выбора часа.
-    """
+    waiting_for_calendar = State()  # Для выбора даты в календаре
+    waiting_for_hour = State()      # Для выбора часа

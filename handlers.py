@@ -1,5 +1,5 @@
 # =========================================================================
-# handlers.py — Абсолютно чистая версия (0 ошибок Pylance)
+# handlers.py — Исправлена ошибка "message is not modified"
 # =========================================================================
 
 import logging
@@ -7,10 +7,11 @@ import calendar
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, MaybeInaccessibleMessage
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest  # <--- ДОБАВЛЕНО
 
 from states import TaskStates
 from database import add_task, get_user_tasks, delete_task, get_completed_tasks, reactivate_task, toggle_task_status
@@ -25,24 +26,28 @@ router = Router()
 
 MONTH_NAMES = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
                "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-DAYS_OF_WEEK = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+def get_main_menu_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить задачу", callback_data="menu:add")
+    kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
+    kb.button(text="📜 История задач", callback_data="menu:history")
+    kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
+    kb.adjust(1)
+    return kb
 
 def generate_calendar(year: int, month: int) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"📅 {MONTH_NAMES[month]} {year}", callback_data="ignore")
     kb.button(text="◀️", callback_data=f"cal:prev:{year}:{month}")
+    kb.button(text=f"{MONTH_NAMES[month]} {year}", callback_data="ignore")
     kb.button(text="▶️", callback_data=f"cal:next:{year}:{month}")
     kb.adjust(3)
-
-    for day in DAYS_OF_WEEK:
-        kb.button(text=day, callback_data="ignore")
-    kb.adjust(7)
 
     month_cal = calendar.monthcalendar(year, month)
     for week in month_cal:
         for day in week:
             if day == 0:
-                kb.button(text=" ", callback_data="ignore")
+                kb.button(text="·", callback_data="ignore")
             else:
                 kb.button(text=str(day), callback_data=f"cal:day:{year}:{month}:{day}")
         kb.adjust(7)
@@ -63,7 +68,6 @@ def generate_hour_selector() -> InlineKeyboardBuilder:
     return kb
 
 async def _finalize_task(user_id: int, due_time_str: str, state: FSMContext, target_message: Message) -> None:
-    """Единая функция для сохранения задачи и планирования напоминания."""
     try:
         data = await state.get_data()
         task_id = await add_task(
@@ -80,8 +84,19 @@ async def _finalize_task(user_id: int, due_time_str: str, state: FSMContext, tar
             )
         
         await state.clear()
-        await target_message.answer(f"✅ Задача добавлена!\n⏰ Время: {due_time_str}")
-        await show_main_menu(target_message)
+        
+        # ИСПРАВЛЕНИЕ: Ловим ошибку, если сообщение и так такое же
+        try:
+            await target_message.edit_text(
+                text=f"✅ Задача добавлена!\n⏰ Время: {due_time_str}",
+                reply_markup=get_main_menu_kb().as_markup()
+            )
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e):
+                await target_message.answer("✅ Задача уже добавлена!")
+            else:
+                raise
+                
     except Exception as e:
         logger.error(f"Ошибка добавления задачи: {e}")
         await target_message.answer("❌ Ошибка при сохранении. Попробуйте /restart.")
@@ -93,46 +108,22 @@ async def _finalize_task(user_id: int, due_time_str: str, state: FSMContext, tar
 # =========================================================================
 
 async def show_main_menu(message: Message) -> None:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить задачу", callback_data="menu:add")
-    kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
-    kb.button(text="📜 История задач", callback_data="menu:history")
-    kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
-    kb.adjust(1)
-
-    await message.answer("🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:", reply_markup=kb.as_markup(), parse_mode="HTML")
-
+    await message.answer(
+        "🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:", 
+        reply_markup=get_main_menu_kb().as_markup(), 
+        parse_mode="HTML"
+    )
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
     await show_main_menu(message)
 
-
 @router.message(Command("restart"))
 async def cmd_restart(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("🔄 Состояние сброшено!")
     await show_main_menu(message)
-
-
-@router.callback_query(F.data == "menu:restart")
-async def callback_restart(callback: CallbackQuery, state: FSMContext) -> None:
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
-    await callback.answer()
-    await state.clear()
-    kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить задачу", callback_data="menu:add")
-    kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
-    kb.button(text="📜 История задач", callback_data="menu:history")
-    kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
-    kb.adjust(1)
-    await callback.message.edit_text(
-        text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
-        reply_markup=kb.as_markup(),
-        parse_mode="HTML"
-    )
 
 
 # =========================================================================
@@ -142,18 +133,15 @@ async def callback_restart(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "menu:add")
 async def menu_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not isinstance(callback.message, Message): return
     await state.set_state(TaskStates.waiting_for_title)
     await callback.message.answer("📝 Введите название задачи:")
-
 
 @router.message(TaskStates.waiting_for_title, F.text)
 async def process_title(message: Message, state: FSMContext) -> None:
     await state.update_data(title=(message.text or "").strip())
     await state.set_state(TaskStates.waiting_for_description)
     await message.answer("📄 Введите описание задачи:")
-
 
 @router.message(TaskStates.waiting_for_description, F.text)
 async def process_description(message: Message, state: FSMContext) -> None:
@@ -177,8 +165,7 @@ async def process_description(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data.regexp(r"^time:quick:(today|tomorrow|week)$"))
 async def cb_quick_time(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     
     choice = callback.data.split(":")[2]
     now = datetime.now()
@@ -193,25 +180,20 @@ async def cb_quick_time(callback: CallbackQuery, state: FSMContext) -> None:
 
     await _finalize_task(user_id, target_time.strftime("%d.%m.%Y %H:%M"), state, callback.message)
 
-
 @router.callback_query(F.data == "time:quick:calendar")
 async def cb_open_calendar(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not isinstance(callback.message, Message): return
     
     now = datetime.now()
     await state.update_data(cal_year=now.year, cal_month=now.month)
     await callback.message.edit_text("📆 Выберите дату:", reply_markup=generate_calendar(now.year, now.month).as_markup())
 
-
 @router.callback_query(F.data.regexp(r"^cal:(prev|next):(\d{4}):(\d{1,2})$"))
 async def cb_navigate_calendar(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     
-    # ИСПРАВЛЕНИЕ: прямое преобразование в int, без создания year_str и month_str
     parts = callback.data.split(":")
     if len(parts) < 4: return
     
@@ -233,26 +215,21 @@ async def cb_navigate_calendar(callback: CallbackQuery, state: FSMContext) -> No
     await state.update_data(cal_year=year, cal_month=month)
     await callback.message.edit_text("📆 Выберите дату:", reply_markup=generate_calendar(year, month).as_markup())
 
-
 @router.callback_query(F.data.regexp(r"^cal:day:(\d{4}):(\d{1,2}):(\d{1,2})$"))
 async def cb_select_day(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     
-    # ИСПРАВЛЕНИЕ: берем только день из конца строки, неиспользуемые переменные удалены
     day_str = callback.data.split(":")[-1]
     
     await state.update_data(cal_day=int(day_str))
     await state.set_state(TaskStates.waiting_for_hour)
-    
     await callback.message.edit_text("🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup())
 
 @router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"))
 async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     
     hour_str = callback.data.split(":")[1]
     data = await state.get_data()
@@ -263,7 +240,46 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 # =========================================================================
-# 4. МОИ ЗАДАЧИ И ИСТОРИЯ
+# 4. ПЕРЕЗАПУСК И МЕНЮ
+# =========================================================================
+
+@router.callback_query(F.data == "menu:restart")
+async def menu_restart(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message): return
+    
+    await state.clear()
+    
+    # ИСПРАВЛЕНИЕ: Ловим ошибку, если пользователь нажал "Перезапустить", находясь в главном меню
+    try:
+        await callback.message.edit_text(
+            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
+            reply_markup=get_main_menu_kb().as_markup(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
+
+@router.callback_query(F.data == "menu:tasks")
+async def menu_tasks(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message): return
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_tasks(user_id, callback.message)
+
+@router.callback_query(F.data == "menu:history")
+async def menu_history(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message): return
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_history(user_id, callback.message)
+
+
+# =========================================================================
+# 5. МОИ ЗАДАЧИ И ИСТОРИЯ
 # =========================================================================
 
 async def cmd_show_tasks(user_id: int, message: Message) -> None:
@@ -283,19 +299,10 @@ async def cmd_show_tasks(user_id: int, message: Message) -> None:
     kb.adjust(2)
     await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
-@router.callback_query(F.data == "menu:tasks")
-async def menu_tasks(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
-    user_id = callback.from_user.id if callback.from_user else 0
-    await cmd_show_tasks(user_id, callback.message)
-
 @router.callback_query(F.data.regexp(r"^tasks:toggle:(\d+)$"))
 async def callback_toggle_task(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     is_completed = await toggle_task_status(task_id)
@@ -309,8 +316,7 @@ async def callback_toggle_task(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.regexp(r"^tasks:del:(\d+)$"))
 async def callback_delete_task_active(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     remove_reminder(task_id)
@@ -334,19 +340,10 @@ async def cmd_show_history(user_id: int, message: Message) -> None:
     kb.adjust(2)
     await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
-@router.callback_query(F.data == "menu:history")
-async def menu_history(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
-    user_id = callback.from_user.id if callback.from_user else 0
-    await cmd_show_history(user_id, callback.message)
-
 @router.callback_query(F.data.regexp(r"^history:reactivate:(\d+)$"))
 async def callback_reactivate(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     await reactivate_task(task_id)
@@ -356,8 +353,7 @@ async def callback_reactivate(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.regexp(r"^history:del:(\d+)$"))
 async def callback_delete_history(callback: CallbackQuery) -> None:
     await callback.answer()
-    if not callback.data or not isinstance(callback.message, (Message, MaybeInaccessibleMessage)):
-        return
+    if not callback.data or not isinstance(callback.message, Message): return
     user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     await delete_task(task_id)
