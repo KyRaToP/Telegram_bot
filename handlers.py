@@ -102,7 +102,7 @@ async def _finalize_task(user_id: int, due_time_str: str, state: FSMContext, tar
         # ИСПРАВЛЕНИЕ: Ловим ошибку, если сообщение и так такое же
         try:
             await target_message.edit_text(
-                text=f"✅ Задача добавлена!\n⏰ Время: {due_time_str}",
+                text=f"✅ Задача добавлена!\n⏰ Время: {due_time_str}\n🏷 Категория: {category}",
                 reply_markup=get_main_menu_kb().as_markup()
             )
         except TelegramBadRequest as e:
@@ -214,8 +214,22 @@ async def cb_quick_tomorrow(callback: CallbackQuery, state: FSMContext) -> None:
             raise
 
 @router.callback_query(F.data == "time:quick:week")
-    # Эта функция уже определена выше в блоке cb_quick_week, оставляем как есть
-    pass
+async def cb_quick_week(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.data or not isinstance(callback.message, Message): return
+    now = datetime.now(timezone(timedelta(hours=3)))
+    days_ahead = 7 - now.weekday()
+    next_monday = now + timedelta(days=days_ahead)
+    await state.set_state(TaskStates.waiting_for_week_day)
+    try:
+        await callback.message.edit_text(
+            "📆 Выберите день:", reply_markup=generate_week_selector(next_monday).as_markup()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
 
 @router.callback_query(F.data == "time:quick:calendar")
 async def cb_open_calendar(callback: CallbackQuery, state: FSMContext) -> None:
@@ -326,79 +340,6 @@ async def cb_week_day_selected(callback: CallbackQuery, state: FSMContext) -> No
             raise
 
 
-async def ask_category_chooser(user_id: int, due_time_str: str, state: FSMContext, target_message: Message) -> None:
-    categories = await get_user_categories(user_id)
-    await state.update_data(due_time_str=due_time_str)
-    await state.set_state(TaskStates.waiting_for_category)
-    kb = InlineKeyboardBuilder()
-    for cat in categories:
-        kb.button(text=cat, callback_data=f"choosecat:{cat}")
-    kb.button(text="➕ Создать новую", callback_data="cat:new")
-    kb.adjust(2)
-    try:
-        await target_message.edit_text("🏷 Выберите категорию задачи:", reply_markup=kb.as_markup())
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await target_message.answer("Меню категорий уже показано")
-        else:
-            raise
-
-
-@router.callback_query(F.data.regexp(r"^choosecat:(.+)$"))
-async def cb_category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    parts = callback.data.split(":", 1)
-    category = parts[1]
-    data = await state.get_data()
-    user_id = callback.from_user.id if callback.from_user else 0
-    due_time_str = data.get("due_time_str")
-    if not due_time_str:
-        await callback.message.answer("❌ Ошибка: время не определено. Попробуйте /restart")
-        return
-    await _finalize_task(user_id, due_time_str, state, callback.message, category=category)
-
-
-@router.callback_query(F.data == "cat:new")
-async def cb_create_new_category(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not isinstance(callback.message, Message): return
-    await state.set_state(TaskStates.waiting_for_new_category_name)
-    try:
-        await callback.message.edit_text("✏️ Введите название новой категории:")
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Уже в режиме ввода")
-        else:
-            raise
-
-
-@router.message(TaskStates.waiting_for_new_category_name, F.text)
-async def process_new_category_name(message: Message, state: FSMContext) -> None:
-    category_name = (message.text or "").strip()
-    if not category_name:
-        await message.answer("Название не может быть пустым. Попробуйте снова:")
-        return
-    user_id = message.from_user.id if message.from_user else 0
-    await add_category(user_id, category_name)
-    # возвращаемся к списку категорий для текущей задачи
-    data = await state.get_data()
-    due_time_str = data.get("due_time_str")
-    await ask_category_chooser(user_id, due_time_str, state, message)
-
-
-@router.callback_query(F.data.regexp(r"^filter:cat:(.+)$"))
-async def cb_filter_category(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    parts = callback.data.split(":", 2)
-    cat = parts[2]
-    user_id = callback.from_user.id if callback.from_user else 0
-    if cat == "ALL":
-        filter_cat: str | None = None
-    else:
-        filter_cat = cat
-    await cmd_show_tasks(user_id, callback.message, filter_category=filter_cat)
 
 
 async def ask_category_chooser(user_id: int, due_time_str: str, state: FSMContext, target_message: Message) -> None:
