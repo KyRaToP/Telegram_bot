@@ -404,7 +404,6 @@ async def cmd_show_tasks(user_id: int, message: Message) -> None:
 async def callback_toggle_task(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     is_completed = await toggle_task_status(task_id)
     if is_completed:
@@ -428,7 +427,6 @@ async def callback_toggle_task(callback: CallbackQuery) -> None:
 async def callback_delete_task_active(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     remove_reminder(task_id)
     await delete_task(task_id)
@@ -466,7 +464,6 @@ async def cmd_show_history(user_id: int, message: Message) -> None:
 async def callback_reactivate(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     await reactivate_task(task_id)
     await callback.answer("↩️ Возвращена!")
@@ -486,7 +483,6 @@ async def callback_reactivate(callback: CallbackQuery) -> None:
 async def callback_delete_history(callback: CallbackQuery) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    user_id = callback.from_user.id if callback.from_user else 0
     task_id = int(callback.data.split(":")[2])
     await delete_task(task_id)
     await callback.answer("🗑 Удалена!")
