@@ -396,6 +396,7 @@ async def cmd_show_tasks(user_id: int, message: Message) -> None:
         toggle_text = "↩️ В активные" if task['is_completed'] else "✅ Выполнить"
         kb.button(text=toggle_text, callback_data=f"tasks:toggle:{task['id']}")
         kb.button(text=f"🗑 {title_short}", callback_data=f"tasks:del:{task['id']}")
+    kb.button(text="🏠 Главное меню", callback_data="menu:restart")
     kb.adjust(2)
     await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
@@ -411,7 +412,17 @@ async def callback_toggle_task(callback: CallbackQuery) -> None:
         await callback.answer("✅ Выполнена!")
     else:
         await callback.answer("↩️ Возвращена!")
-    await cmd_show_tasks(user_id, callback.message)
+    try:
+        await callback.message.edit_text(
+            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
+            reply_markup=get_main_menu_kb().as_markup(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
 
 @router.callback_query(F.data.regexp(r"^tasks:del:(\d+)$"))
 async def callback_delete_task_active(callback: CallbackQuery) -> None:
@@ -422,7 +433,17 @@ async def callback_delete_task_active(callback: CallbackQuery) -> None:
     remove_reminder(task_id)
     await delete_task(task_id)
     await callback.answer("🗑 Удалена!")
-    await cmd_show_tasks(user_id, callback.message)
+    try:
+        await callback.message.edit_text(
+            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
+            reply_markup=get_main_menu_kb().as_markup(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
 
 
 async def cmd_show_history(user_id: int, message: Message) -> None:
@@ -437,6 +458,7 @@ async def cmd_show_history(user_id: int, message: Message) -> None:
         title_short = (task['title'] or "Задача")[:10]
         kb.button(text="↩️ Вернуть", callback_data=f"history:reactivate:{task['id']}")
         kb.button(text=f"🗑 {title_short}", callback_data=f"history:del:{task['id']}")
+    kb.button(text="🏠 Главное меню", callback_data="menu:restart")
     kb.adjust(2)
     await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
@@ -448,7 +470,17 @@ async def callback_reactivate(callback: CallbackQuery) -> None:
     task_id = int(callback.data.split(":")[2])
     await reactivate_task(task_id)
     await callback.answer("↩️ Возвращена!")
-    await cmd_show_history(user_id, callback.message)
+    try:
+        await callback.message.edit_text(
+            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
+            reply_markup=get_main_menu_kb().as_markup(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
 
 @router.callback_query(F.data.regexp(r"^history:del:(\d+)$"))
 async def callback_delete_history(callback: CallbackQuery) -> None:
@@ -458,4 +490,14 @@ async def callback_delete_history(callback: CallbackQuery) -> None:
     task_id = int(callback.data.split(":")[2])
     await delete_task(task_id)
     await callback.answer("🗑 Удалена!")
-    await cmd_show_history(user_id, callback.message)
+    try:
+        await callback.message.edit_text(
+            text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
+            reply_markup=get_main_menu_kb().as_markup(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
