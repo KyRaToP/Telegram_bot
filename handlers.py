@@ -428,7 +428,6 @@ async def menu_restart(callback: CallbackQuery, state: FSMContext) -> None:
     
     await state.clear()
     
-    user_id = callback.from_user.id if callback.from_user else 0
     await show_main_menu(callback.message)
 
 @router.callback_query(F.data == "menu:tasks")
