@@ -116,6 +116,25 @@ async def cmd_restart(message: Message, state: FSMContext) -> None:
     await show_main_menu(message)
 
 
+@router.callback_query(F.data == "menu:restart")
+async def callback_restart(callback: CallbackQuery, state: FSMContext) -> None:
+    if not callback.data or not isinstance(callback.message, Message):
+        return
+    await callback.answer()
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить задачу", callback_data="menu:add")
+    kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
+    kb.button(text="📜 История задач", callback_data="menu:history")
+    kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
+    kb.adjust(1)
+    await callback.message.edit_text(
+        text="🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+
+
 # =========================================================================
 # 2. ДОБАВЛЕНИЕ ЗАДАЧИ (FSM)
 # =========================================================================
