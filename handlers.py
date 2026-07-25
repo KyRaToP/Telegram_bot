@@ -214,7 +214,6 @@ async def cb_select_day(callback: CallbackQuery, state: FSMContext) -> None:
     
     _, year_str, month_str, day_str = callback.data.split(":")
     await state.update_data(cal_day=int(day_str))
-    await state.set_state(TaskStates.waiting_for_hour)
     
     await callback.message.edit_text("🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup())
 
@@ -224,7 +223,7 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
     
-    hour_str = callback.data.split(":")[1]
+    hour_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     user_id = callback.from_user.id if callback.from_user else 0
     
@@ -329,3 +328,22 @@ async def callback_delete_history(callback: CallbackQuery) -> None:
     await delete_task(task_id)
     await callback.answer("🗑 Удалена!")
     await cmd_show_history(user_id, callback.message)
+
+
+@router.callback_query(F.data == "ignore")
+async def cb_ignore(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:restart")
+async def cb_restart(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message): return
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить задачу", callback_data="menu:add")
+    kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
+    kb.button(text="📜 История задач", callback_data="menu:history")
+    kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
+    kb.adjust(1)
+    await callback.message.edit_text("🤖 <b>Я бот для планирования задач.</b>\n\nВыберите действие:", reply_markup=kb.as_markup(), parse_mode="HTML")
