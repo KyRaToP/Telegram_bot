@@ -6,3 +6,6 @@ class TaskStates(StatesGroup):
     waiting_for_description = State()
     waiting_for_calendar = State()  # Для выбора даты в календаре
     waiting_for_hour = State()      # Для выбора часа
+    waiting_for_today_time = State()
+    waiting_for_tomorrow_time = State()
+    waiting_for_week_day = State()
