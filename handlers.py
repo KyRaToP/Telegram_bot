@@ -291,7 +291,7 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
         due_time_str = f"{selected_date} {hour_str}"
     else:
         due_time_str = f"{data.get('cal_day'):02d}.{data.get('cal_month'):02d}.{data.get('cal_year')} {hour_str}"
-    await ask_category_chooser(user_id, due_time_str, state, callback.message)
+    await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
 @router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"), TaskStates.waiting_for_today_time)
@@ -342,17 +342,17 @@ async def cb_week_day_selected(callback: CallbackQuery, state: FSMContext) -> No
 
 
 
-async def ask_category_chooser(user_id: int, due_time_str: str, state: FSMContext, target_message: Message) -> None:
+async def show_category_chooser(user_id: int, due_time_str: str, state: FSMContext, target_message: Message) -> None:
     categories = await get_user_categories(user_id)
-    await state.update_data(due_time_str=due_time_str)
+    await state.update_data(final_due_time=str(due_time_str))
     await state.set_state(TaskStates.waiting_for_category)
     kb = InlineKeyboardBuilder()
     for cat in categories:
-        kb.button(text=cat, callback_data=f"choosecat:{cat}")
+        kb.button(text=cat, callback_data=f"cat:choose:{cat}")
     kb.button(text="➕ Создать новую", callback_data="cat:new")
     kb.adjust(2)
     try:
-        await target_message.edit_text("🏷 Выберите категорию задачи:", reply_markup=kb.as_markup())
+        await target_message.edit_text("📂 Выберите категорию:", reply_markup=kb.as_markup())
     except TelegramBadRequest as e:
         if "message is not modified" in str(e):
             await target_message.answer("Меню категорий уже показано")
@@ -360,15 +360,14 @@ async def ask_category_chooser(user_id: int, due_time_str: str, state: FSMContex
             raise
 
 
-@router.callback_query(F.data.regexp(r"^choosecat:(.+)$"))
-async def cb_category_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data.regexp(r"^cat:choose:(.+)$"))
+async def cb_category_choose(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
-    parts = callback.data.split(":", 1)
-    category = parts[1]
+    category = callback.data.split(":", 2)[2]
     data = await state.get_data()
     user_id = callback.from_user.id if callback.from_user else 0
-    due_time_str = data.get("due_time_str")
+    due_time_str = str(data.get("final_due_time") or "")
     if not due_time_str:
         await callback.message.answer("❌ Ошибка: время не определено. Попробуйте /restart")
         return
@@ -399,8 +398,8 @@ async def process_new_category_name(message: Message, state: FSMContext) -> None
     await add_category(user_id, category_name)
     # возвращаемся к списку категорий для текущей задачи
     data = await state.get_data()
-    due_time_str = (data.get("due_time_str") or "Не указано")
-    await ask_category_chooser(user_id, due_time_str, state, message)
+    due_time_str = str(data.get("final_due_time") or "Не указано")
+    await show_category_chooser(user_id, due_time_str, state, message)
 
 
 @router.callback_query(F.data.regexp(r"^filter:cat:(.+)$"))
@@ -449,12 +448,16 @@ async def menu_history(callback: CallbackQuery) -> None:
 # 5. МОИ ЗАДАЧИ И ИСТОРИЯ
 # =========================================================================
 
-async def cmd_show_tasks(user_id: int, message: Message, filter_category: str | None = None) -> None:
-    tasks = await get_user_tasks(user_id, category=filter_category) if filter_category else await get_user_tasks(user_id)
+async def cmd_show_tasks(user_id: int, message: Message, filter_category: str = "ALL") -> None:
+    if filter_category == "ALL":
+        category_param = None
+    else:
+        category_param = filter_category
+    tasks = await get_user_tasks(user_id, category=category_param)
     categories = await get_user_categories(user_id)
     if not tasks:
         text = "📋 Нет активных задач."
-        if filter_category:
+        if filter_category and filter_category != "ALL":
             text = f"📋 Нет активных задач в категории «{filter_category}»."
         await message.answer(
             text,
@@ -462,7 +465,7 @@ async def cmd_show_tasks(user_id: int, message: Message, filter_category: str | 
         )
         return
     
-    filter_line = f" (фильтр: <b>{filter_category}</b>)" if filter_category else ""
+    filter_line = f" (фильтр: <b>{filter_category}</b>)" if filter_category and filter_category != "ALL" else ""
     text = f"📋 <b>Ваши задачи:</b>{filter_line}\n\n"
     kb = InlineKeyboardBuilder()
     
