@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from database import init_db
 from middlewares import DbMiddleware
@@ -41,9 +42,21 @@ async def main() -> None:
     start_scheduler()
     logger.info("✅ Планировщик запущен.")
     
-    # ПРОСТОЙ ЗАПУСК БЕЗ ЯВНОГО УКАЗАНИЯ ПРОКСИ
-    # Karing в TUN-режиме сам перехватит этот трафик и направит его через Польшу
-    bot = Bot(token=BOT_TOKEN)
+    # Настройка сессии с увеличенным лимитом соединений и опциональным SOCKS‑прокси
+    import aiohttp
+    timeout = aiohttp.ClientTimeout(total=30)
+    try:
+        from aiohttp_socks import ProxyConnector
+    except ImportError:
+        ProxyConnector = None  # type: ignore
+    proxy_url = os.environ.get("BOT_PROXY_URL")
+    connector = ProxyConnector.from_url(proxy_url) if ProxyConnector and proxy_url else None
+    session = AiohttpSession(
+        connector=connector,
+        limit=200,
+        timeout=timeout,
+    )
+    bot = Bot(token=BOT_TOKEN, session=session)
     logger.info("✅ Бот инициализирован (используется системный маршрут Karing)")
 
     dp = Dispatcher()
