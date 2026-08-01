@@ -290,7 +290,14 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     if selected_date:
         due_time_str = f"{selected_date} {hour_str}"
     else:
-        due_time_str = f"{data.get('cal_day'):02d}.{data.get('cal_month'):02d}.{data.get('cal_year')} {hour_str}"
+        cal_day = data.get("cal_day")
+        cal_month = data.get("cal_month")
+        cal_year = data.get("cal_year")
+        if cal_day is None or cal_month is None or cal_year is None:
+            now = datetime.now(timezone(timedelta(hours=3)))
+            due_time_str = f"{now.strftime('%d.%m.%Y')} {hour_str}"
+        else:
+            due_time_str = f"{cal_day:02d}.{cal_month:02d}.{cal_year} {hour_str}"
     await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
