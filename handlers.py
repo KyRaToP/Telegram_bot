@@ -399,7 +399,7 @@ async def process_new_category_name(message: Message, state: FSMContext) -> None
     await add_category(user_id, category_name)
     # возвращаемся к списку категорий для текущей задачи
     data = await state.get_data()
-    due_time_str = data.get("due_time_str")
+    due_time_str = (data.get("due_time_str") or "Не указано")
     await ask_category_chooser(user_id, due_time_str, state, message)
 
 
