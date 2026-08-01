@@ -277,7 +277,7 @@ async def cb_select_day(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(TaskStates.waiting_for_hour)
     await callback.message.edit_text("🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup())
 
-@router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"))
+@router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"), TaskStates.waiting_for_hour)
 async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if not callback.data or not isinstance(callback.message, Message): return
@@ -410,7 +410,7 @@ async def cb_filter_category(callback: CallbackQuery) -> None:
     cat = parts[2]
     user_id = callback.from_user.id if callback.from_user else 0
     if cat == "ALL":
-        filter_cat: str | None = None
+        filter_cat = "ALL"
     else:
         filter_cat = cat
     await cmd_show_tasks(user_id, callback.message, filter_category=filter_cat)
