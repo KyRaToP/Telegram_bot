@@ -303,7 +303,7 @@ async def cb_select_hour_today(callback: CallbackQuery, state: FSMContext) -> No
     user_id = callback.from_user.id if callback.from_user else 0
     selected_date = data.get("selected_date")
     due_time_str = f"{selected_date} {hour_str}" if selected_date else f"{datetime.now(timezone(timedelta(hours=3))).strftime('%d.%m.%Y')} {hour_str}"
-    await ask_category_chooser(user_id, due_time_str, state, callback.message)
+    await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
 @router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"), TaskStates.waiting_for_tomorrow_time)
@@ -315,7 +315,7 @@ async def cb_select_hour_tomorrow(callback: CallbackQuery, state: FSMContext) ->
     user_id = callback.from_user.id if callback.from_user else 0
     selected_date = data.get("selected_date")
     due_time_str = f"{selected_date} {hour_str}" if selected_date else f"{(datetime.now(timezone(timedelta(hours=3))) + timedelta(days=1)).strftime('%d.%m.%Y')} {hour_str}"
-    await ask_category_chooser(user_id, due_time_str, state, callback.message)
+    await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
 @router.callback_query(F.data.regexp(r"^week:day:(\d{4}):(\d{1,2}):(\d{1,2})$"))
