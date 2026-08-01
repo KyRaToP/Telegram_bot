@@ -32,6 +32,7 @@ def get_main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="➕ Добавить задачу", callback_data="menu:add")
     kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
     kb.button(text="📜 История задач", callback_data="menu:history")
+    kb.button(text="📂 Категории", callback_data="menu:categories")
     kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
     kb.adjust(1)
     return kb
@@ -403,10 +404,16 @@ async def process_new_category_name(message: Message, state: FSMContext) -> None
         return
     user_id = message.from_user.id if message.from_user else 0
     await add_category(user_id, category_name)
-    # возвращаемся к списку категорий для текущей задачи
+    # получаем время из состояния
     data = await state.get_data()
     due_time_str = str(data.get("final_due_time") or "Не указано")
-    await show_category_chooser(user_id, due_time_str, state, message)
+    # Отправляем новое сообщение, потому что пользовательское нельзя редактировать
+    sent_msg = await message.answer("🔄 Обновляем категории...")
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+    await show_category_chooser(user_id, due_time_str, state, sent_msg)
 
 
 @router.callback_query(F.data.regexp(r"^filter:cat:(.+)$"))
@@ -449,6 +456,35 @@ async def menu_history(callback: CallbackQuery) -> None:
     if not isinstance(callback.message, Message): return
     user_id = callback.from_user.id if callback.from_user else 0
     await cmd_show_history(user_id, callback.message)
+
+
+@router.callback_query(F.data == "menu:categories")
+async def menu_categories(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message): return
+    user_id = callback.from_user.id if callback.from_user else 0
+    categories = await get_user_categories(user_id)
+    kb = InlineKeyboardBuilder()
+    for cat in categories:
+        kb.button(text=cat, callback_data=f"cat_tasks:{cat}")
+    kb.button(text="🏠 Главное меню", callback_data="menu:restart")
+    kb.adjust(2)
+    try:
+        await callback.message.edit_text("📂 Категории:", reply_markup=kb.as_markup())
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer("Меню уже актуально")
+        else:
+            raise
+
+
+@router.callback_query(F.data.regexp(r"^cat_tasks:(.+)$"))
+async def cb_cat_tasks(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.data or not isinstance(callback.message, Message): return
+    cat = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id if callback.from_user else 0
+    await cmd_show_tasks(user_id, callback.message, filter_category=cat)
 
 
 # =========================================================================
