@@ -39,10 +39,17 @@ def get_main_menu_kb() -> InlineKeyboardBuilder:
 
 def generate_calendar(year: int, month: int) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
+    # строка навигации
     kb.button(text="◀️", callback_data=f"cal:prev:{year}:{month}")
-    kb.button(text=f"{MONTH_NAMES[month]} {year}", callback_data="ignore")
+    kb.button(text=f"📅 {MONTH_NAMES[month]} {year}", callback_data="ignore")
     kb.button(text="▶️", callback_data=f"cal:next:{year}:{month}")
     kb.adjust(3)
+
+    # заголовки дней недели
+    weekdays = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    for wd in weekdays:
+        kb.button(text=wd, callback_data="ignore")
+    kb.adjust(7)
 
     month_cal = calendar.monthcalendar(year, month)
     for week in month_cal:
@@ -70,14 +77,17 @@ def generate_hour_selector() -> InlineKeyboardBuilder:
 
 def generate_digital_clock(hour: int, minute: int) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️", callback_data="clock:adj:down:hour")
+    # Часы
+    kb.button(text="⬇️", callback_data="clock:adj:down:hour")
     kb.button(text=f"⏰ {hour:02d}", callback_data="ignore")
-    kb.button(text="▶️", callback_data="clock:adj:up:hour")
+    kb.button(text="⬆️", callback_data="clock:adj:up:hour")
     kb.adjust(3)
-    kb.button(text="◀️", callback_data="clock:adj:down:minute")
+    # Минуты
+    kb.button(text="⬇️", callback_data="clock:adj:down:minute")
     kb.button(text=f"⏱ {minute:02d}", callback_data="ignore")
-    kb.button(text="▶️", callback_data="clock:adj:up:minute")
+    kb.button(text="⬆️", callback_data="clock:adj:up:minute")
     kb.adjust(3)
+    # Подтверждение
     kb.button(text="✅ Подтвердить", callback_data="clock:confirm")
     kb.adjust(1)
     return kb
@@ -415,6 +425,12 @@ async def menu_restart(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     
     await show_main_menu(callback.message)
+
+
+@router.callback_query(F.data == "ignore")
+async def ignore_callback(callback: CallbackQuery) -> None:
+    await callback.answer()
+
 
 @router.callback_query(F.data == "menu:tasks")
 async def menu_tasks(callback: CallbackQuery) -> None:
