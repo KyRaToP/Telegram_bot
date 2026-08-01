@@ -30,9 +30,9 @@ MONTH_NAMES = ["", "Январь", "Февраль", "Март", "Апрель",
 def get_main_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить задачу", callback_data="menu:add")
+    kb.button(text="📂 Категории", callback_data="menu:categories")
     kb.button(text="📋 Мои задачи", callback_data="menu:tasks")
     kb.button(text="📜 История задач", callback_data="menu:history")
-    kb.button(text="📂 Категории", callback_data="menu:categories")
     kb.button(text="🔄 Перезапустить", callback_data="menu:restart")
     kb.adjust(1)
     return kb
@@ -64,6 +64,21 @@ def generate_hour_selector() -> InlineKeyboardBuilder:
         kb.button(text=time_str, callback_data=f"hour:{time_str}")
     kb.adjust(4)
     kb.button(text="❌ Отмена", callback_data="menu:restart")
+    kb.adjust(1)
+    return kb
+
+
+def generate_digital_clock(hour: int, minute: int) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️", callback_data="clock:adj:down:hour")
+    kb.button(text=f"⏰ {hour:02d}", callback_data="ignore")
+    kb.button(text="▶️", callback_data="clock:adj:up:hour")
+    kb.adjust(3)
+    kb.button(text="◀️", callback_data="clock:adj:down:minute")
+    kb.button(text=f"⏱ {minute:02d}", callback_data="ignore")
+    kb.button(text="▶️", callback_data="clock:adj:up:minute")
+    kb.adjust(3)
+    kb.button(text="✅ Подтвердить", callback_data="clock:confirm")
     kb.adjust(1)
     return kb
 
@@ -161,76 +176,18 @@ async def process_title(message: Message, state: FSMContext) -> None:
 @router.message(TaskStates.waiting_for_description, F.text)
 async def process_description(message: Message, state: FSMContext) -> None:
     await state.update_data(description=(message.text or "").strip())
+    now = datetime.now(timezone(timedelta(hours=3)))
+    await state.update_data(cal_year=now.year, cal_month=now.month)
     await state.set_state(TaskStates.waiting_for_calendar)
-    
-    kb = InlineKeyboardBuilder()
-    kb.button(text="⚡ Сегодня", callback_data="time:quick:today")
-    kb.button(text="📅 Завтра", callback_data="time:quick:tomorrow")
-    kb.button(text="🗓 Через неделю", callback_data="time:quick:week")
-    kb.button(text="📆 Выбрать дату и время", callback_data="time:quick:calendar")
-    kb.adjust(2)
-    
-    await message.answer("⏰ Выберите время выполнения задачи:", reply_markup=kb.as_markup())
+    await message.answer("📆 Выберите дату:", reply_markup=generate_calendar(now.year, now.month).as_markup())
 
 
 # =========================================================================
 # 3. ОБРАБОТКА ВЫБОРА ВРЕМЕНИ (CALLBACKS)
 # =========================================================================
 
-@router.callback_query(F.data == "time:quick:today")
-async def cb_quick_today(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    now = datetime.now(timezone(timedelta(hours=3)))
-    selected_date = now.strftime("%d.%m.%Y")
-    await state.update_data(selected_date=selected_date)
-    await state.set_state(TaskStates.waiting_for_today_time)
-    try:
-        await callback.message.edit_text(
-            "🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup()
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
 
-@router.callback_query(F.data == "time:quick:tomorrow")
-async def cb_quick_tomorrow(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    now = datetime.now(timezone(timedelta(hours=3)))
-    tomorrow = now + timedelta(days=1)
-    selected_date = tomorrow.strftime("%d.%m.%Y")
-    await state.update_data(selected_date=selected_date)
-    await state.set_state(TaskStates.waiting_for_tomorrow_time)
-    try:
-        await callback.message.edit_text(
-            "🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup()
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
 
-@router.callback_query(F.data == "time:quick:week")
-async def cb_quick_week(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    now = datetime.now(timezone(timedelta(hours=3)))
-    days_ahead = 7 - now.weekday()
-    next_monday = now + timedelta(days=days_ahead)
-    await state.set_state(TaskStates.waiting_for_week_day)
-    try:
-        await callback.message.edit_text(
-            "📆 Выберите день:", reply_markup=generate_week_selector(next_monday).as_markup()
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
 
 @router.callback_query(F.data == "time:quick:calendar")
 async def cb_open_calendar(callback: CallbackQuery, state: FSMContext) -> None:
@@ -274,9 +231,65 @@ async def cb_select_day(callback: CallbackQuery, state: FSMContext) -> None:
     
     day_str = callback.data.split(":")[-1]
     
-    await state.update_data(cal_day=int(day_str))
-    await state.set_state(TaskStates.waiting_for_hour)
-    await callback.message.edit_text("🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup())
+    await state.update_data(cal_day=int(day_str), clock_hour=0, clock_minute=0)
+    await state.set_state(TaskStates.waiting_for_clock)
+    await callback.message.edit_text(
+        "⏰ Установите время:",
+        reply_markup=generate_digital_clock(0, 0).as_markup()
+    )
+
+
+@router.callback_query(F.data.regexp(r"^clock:adj:(up|down):(hour|minute)$"), TaskStates.waiting_for_clock)
+async def cb_clock_adj(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.data or not isinstance(callback.message, Message): return
+    parts = callback.data.split(":")
+    direction = parts[2]   # up/down
+    unit = parts[3]        # hour/minute
+    data = await state.get_data()
+    cur_hour = int(data.get("clock_hour", 0))
+    cur_minute = int(data.get("clock_minute", 0))
+    if unit == "hour":
+        if direction == "up":
+            cur_hour = (cur_hour + 1) % 24
+        else:
+            cur_hour = (cur_hour - 1) % 24
+    else:
+        if direction == "up":
+            cur_minute = (cur_minute + 1) % 60
+        else:
+            cur_minute = (cur_minute - 1) % 60
+    await state.update_data(clock_hour=cur_hour, clock_minute=cur_minute)
+    try:
+        await callback.message.edit_text(
+            "⏰ Установите время:",
+            reply_markup=generate_digital_clock(cur_hour, cur_minute).as_markup()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await callback.answer()
+        else:
+            raise
+
+
+@router.callback_query(F.data == "clock:confirm", TaskStates.waiting_for_clock)
+async def cb_clock_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.data or not isinstance(callback.message, Message): return
+    data = await state.get_data()
+    cal_day = data.get("cal_day")
+    cal_month = data.get("cal_month")
+    cal_year = data.get("cal_year")
+    hour = int(data.get("clock_hour", 0))
+    minute = int(data.get("clock_minute", 0))
+    if cal_day is None or cal_month is None or cal_year is None:
+        now = datetime.now(timezone(timedelta(hours=3)))
+        due_time_str = f"{now.strftime('%d.%m.%Y')} {hour:02d}:{minute:02d}"
+    else:
+        due_time_str = f"{cal_day:02d}.{cal_month:02d}.{cal_year} {hour:02d}:{minute:02d}"
+    user_id = callback.from_user.id if callback.from_user else 0
+    await show_category_chooser(user_id, due_time_str, state, callback.message)
+
 
 @router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"), TaskStates.waiting_for_hour)
 async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
@@ -302,50 +315,10 @@ async def cb_select_hour(callback: CallbackQuery, state: FSMContext) -> None:
     await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
-@router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"), TaskStates.waiting_for_today_time)
-async def cb_select_hour_today(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    hour_str = callback.data.split(":", 1)[1]
-    data = await state.get_data()
-    user_id = callback.from_user.id if callback.from_user else 0
-    selected_date = data.get("selected_date")
-    due_time_str = f"{selected_date} {hour_str}" if selected_date else f"{datetime.now(timezone(timedelta(hours=3))).strftime('%d.%m.%Y')} {hour_str}"
-    await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
-@router.callback_query(F.data.regexp(r"^hour:(\d{2}:\d{2})$"), TaskStates.waiting_for_tomorrow_time)
-async def cb_select_hour_tomorrow(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    hour_str = callback.data.split(":", 1)[1]
-    data = await state.get_data()
-    user_id = callback.from_user.id if callback.from_user else 0
-    selected_date = data.get("selected_date")
-    due_time_str = f"{selected_date} {hour_str}" if selected_date else f"{(datetime.now(timezone(timedelta(hours=3))) + timedelta(days=1)).strftime('%d.%m.%Y')} {hour_str}"
-    await show_category_chooser(user_id, due_time_str, state, callback.message)
 
 
-@router.callback_query(F.data.regexp(r"^week:day:(\d{4}):(\d{1,2}):(\d{1,2})$"))
-async def cb_week_day_selected(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    if not callback.data or not isinstance(callback.message, Message): return
-    parts = callback.data.split(":")
-    year = int(parts[2])
-    month = int(parts[3])
-    day = int(parts[4])
-    selected_date = f"{day:02d}.{month:02d}.{year}"
-    await state.update_data(selected_date=selected_date)
-    await state.set_state(TaskStates.waiting_for_hour)
-    try:
-        await callback.message.edit_text(
-            "🕒 Выберите час:", reply_markup=generate_hour_selector().as_markup()
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Меню уже актуально")
-        else:
-            raise
 
 
 
