@@ -1,7 +1,5 @@
 # Виртуальное окружение Python
 venv/
-env/
-ENV/
 
 # Файлы с секретами (ТОКЕН БОТА!)
 .env
@@ -16,10 +14,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Файлы Aider
-.aider*
-.aider.tags.cache.v4/
 
 # IDE и редакторы
 .vscode/
