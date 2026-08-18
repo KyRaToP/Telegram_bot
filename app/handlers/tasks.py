@@ -16,6 +16,7 @@ from app.db import (
     delete_category,
     delete_task,
     get_completed_tasks,
+    get_owned_task,
     get_user_categories,
     get_user_tasks,
     reactivate_task,
@@ -640,32 +641,47 @@ async def cmd_show_tasks(
 
 @router.callback_query(F.data.regexp(r"^tasks:toggle:(\d+)$"))
 async def callback_toggle_task(callback: CallbackQuery) -> None:
-    await callback.answer()
     if not callback.data or not isinstance(callback.message, Message):
+        await callback.answer()
         return
 
     task_id = int(callback.data.split(":")[2])
-    is_completed = await toggle_task_status(task_id)
+    user_id = callback.from_user.id if callback.from_user else 0
+    is_completed = await toggle_task_status(task_id, user_id)
+    if is_completed is None:
+        await callback.answer("Нет доступа к этой задаче", show_alert=True)
+        return
     if is_completed:
         remove_reminder(task_id)
         await callback.answer("✅ Выполнена!")
     else:
+        task = await get_owned_task(task_id, user_id)
+        if task and task.get("due_time") and callback.message.bot:
+            schedule_reminder(
+                bot=callback.message.bot,
+                user_id=user_id,
+                task_id=task_id,
+                title=str(task.get("title") or "Без названия"),
+                run_time_str=str(task["due_time"]),
+            )
         await callback.answer("↩️ Возвращена!")
-    user_id = callback.from_user.id if callback.from_user else 0
     await cmd_show_tasks(user_id, callback.message)
 
 
 @router.callback_query(F.data.regexp(r"^tasks:del:(\d+)$"))
 async def callback_delete_task_active(callback: CallbackQuery) -> None:
-    await callback.answer()
     if not callback.data or not isinstance(callback.message, Message):
+        await callback.answer()
         return
 
     task_id = int(callback.data.split(":")[2])
-    remove_reminder(task_id)
-    await delete_task(task_id)
-    await callback.answer("🗑 Удалена!")
     user_id = callback.from_user.id if callback.from_user else 0
+    deleted = await delete_task(task_id, user_id)
+    if not deleted:
+        await callback.answer("Нет доступа к этой задаче", show_alert=True)
+        return
+    remove_reminder(task_id)
+    await callback.answer("🗑 Удалена!")
     await cmd_show_tasks(user_id, callback.message)
 
 
@@ -689,25 +705,41 @@ async def cmd_show_history(user_id: int, message: Message) -> None:
 
 @router.callback_query(F.data.regexp(r"^history:reactivate:(\d+)$"))
 async def callback_reactivate(callback: CallbackQuery) -> None:
-    await callback.answer()
     if not callback.data or not isinstance(callback.message, Message):
+        await callback.answer()
         return
 
     task_id = int(callback.data.split(":")[2])
-    await reactivate_task(task_id)
-    await callback.answer("↩️ Возвращена!")
     user_id = callback.from_user.id if callback.from_user else 0
+    restored = await reactivate_task(task_id, user_id)
+    if not restored:
+        await callback.answer("Нет доступа к этой задаче", show_alert=True)
+        return
+    task = await get_owned_task(task_id, user_id)
+    if task and task.get("due_time") and callback.message.bot:
+        schedule_reminder(
+            bot=callback.message.bot,
+            user_id=user_id,
+            task_id=task_id,
+            title=str(task.get("title") or "Без названия"),
+            run_time_str=str(task["due_time"]),
+        )
+    await callback.answer("↩️ Возвращена!")
     await cmd_show_history(user_id, callback.message)
 
 
 @router.callback_query(F.data.regexp(r"^history:del:(\d+)$"))
 async def callback_delete_history(callback: CallbackQuery) -> None:
-    await callback.answer()
     if not callback.data or not isinstance(callback.message, Message):
+        await callback.answer()
         return
 
     task_id = int(callback.data.split(":")[2])
-    await delete_task(task_id)
-    await callback.answer("Удалена")
     user_id = callback.from_user.id if callback.from_user else 0
+    deleted = await delete_task(task_id, user_id)
+    if not deleted:
+        await callback.answer("Нет доступа к этой задаче", show_alert=True)
+        return
+    remove_reminder(task_id)
+    await callback.answer("Удалена")
     await cmd_show_history(user_id, callback.message)

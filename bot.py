@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 from app.db import init_db
 from app.handlers import router as tasks_router
 from app.middlewares import DbMiddleware
-from app.services import start_scheduler
+from app.services import restore_reminders, start_scheduler
+from app.services.access import log_allowlist_status
 from app.services.bot_menu import setup_bot_menu
 from app.services.network import resolve_telegram_proxy
 
@@ -50,6 +51,7 @@ def create_bot() -> Bot:
 async def main() -> None:
     logger.info("Запуск бота...")
     await init_db()
+    log_allowlist_status()
 
     bot = create_bot()
     logger.info("✅ Бот инициализирован")
@@ -59,7 +61,8 @@ async def main() -> None:
 
     # Pass Bot into scheduler so digest cron jobs can send messages.
     start_scheduler(bot)
-    logger.info("✅ Планировщик и digest jobs запущены.")
+    await restore_reminders(bot)
+    logger.info("✅ Планировщик, digest jobs и reminders восстановлены.")
 
     dispatcher = Dispatcher()
     dispatcher.update.middleware(DbMiddleware())

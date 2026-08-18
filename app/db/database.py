@@ -111,6 +111,26 @@ async def get_task(task_id: int) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
+async def get_owned_task(task_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_active_tasks_for_reminders() -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM tasks WHERE is_completed != 1 AND due_time IS NOT NULL"
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_user_tasks(
     user_id: int, category: str | None = None
 ) -> List[Dict[str, Any]]:
@@ -181,12 +201,13 @@ async def get_tasks_for_week(user_id: int, week_start: datetime) -> List[Dict[st
 
 async def update_task(
     task_id: int,
+    user_id: int,
     *,
     title: str | None = None,
     description: str | None = None,
     due_time: str | None = None,
     category: str | None = None,
-) -> None:
+) -> bool:
     fields: list[str] = []
     values: list[Any] = []
 
@@ -204,44 +225,54 @@ async def update_task(
         values.append(category)
 
     if not fields:
-        return
+        return False
 
-    values.append(task_id)
+    values.extend([task_id, user_id])
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?",
+        cursor = await db.execute(
+            f"UPDATE tasks SET {', '.join(fields)} WHERE id = ? AND user_id = ?",
             values,
         )
         await db.commit()
+        return int(cursor.rowcount or 0) > 0
 
 
-async def reactivate_task(task_id: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE tasks SET is_completed = 0 WHERE id = ?", (task_id,))
-        await db.commit()
-
-
-async def toggle_task_status(task_id: int) -> bool:
+async def reactivate_task(task_id: int, user_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT is_completed FROM tasks WHERE id = ?", (task_id,)
+            "UPDATE tasks SET is_completed = 0 WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        )
+        await db.commit()
+        return int(cursor.rowcount or 0) > 0
+
+
+async def toggle_task_status(task_id: int, user_id: int) -> Optional[bool]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT is_completed FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
         )
         row = await cursor.fetchone()
         if row:
             new_status = 0 if row[0] else 1
             await db.execute(
-                "UPDATE tasks SET is_completed = ? WHERE id = ?",
-                (new_status, task_id),
+                "UPDATE tasks SET is_completed = ? WHERE id = ? AND user_id = ?",
+                (new_status, task_id, user_id),
             )
             await db.commit()
             return bool(new_status)
-        return False
+        return None
 
 
-async def delete_task(task_id: int) -> None:
+async def delete_task(task_id: int, user_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        cursor = await db.execute(
+            "DELETE FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        )
         await db.commit()
+        return int(cursor.rowcount or 0) > 0
 
 
 async def _reset_tasks_sequence(db: aiosqlite.Connection) -> None:
@@ -283,7 +314,6 @@ async def clear_active_tasks(user_id: int) -> list[int]:
             "DELETE FROM tasks WHERE user_id = ? AND is_completed != 1",
             (user_id,),
         )
-        await _reset_tasks_sequence(db)
         await db.commit()
         return task_ids
 
@@ -296,7 +326,6 @@ async def clear_completed_tasks(user_id: int) -> int:
             (user_id,),
         )
         deleted_count = int(cursor.rowcount or 0)
-        await _reset_tasks_sequence(db)
         await db.commit()
         return deleted_count
 

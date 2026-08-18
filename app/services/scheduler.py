@@ -1,18 +1,22 @@
 import logging
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 
 from app.db import (
+    get_active_tasks_for_reminders,
     get_tasks_for_date,
     get_tasks_for_week,
     get_users_for_daily_digest,
     get_users_for_weekly_digest,
 )
+from app.services.access import is_allowed
 
 logger = logging.getLogger(__name__)
 
+MSK = ZoneInfo("Europe/Moscow")
 scheduler: AsyncIOScheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 DIGEST_MORNING_JOB_ID = "digest_daily_morning"
 DIGEST_EVENING_JOB_ID = "digest_daily_evening"
@@ -27,8 +31,12 @@ def _format_task_line(task: dict) -> str:
     )
 
 
+def now_in_moscow() -> datetime:
+    return datetime.now(MSK).replace(tzinfo=None)
+
+
 async def build_daily_digest_text(user_id: int, day: datetime | None = None) -> str:
-    target_day = day or datetime.now()
+    target_day = day or now_in_moscow()
     tasks = await get_tasks_for_date(user_id, target_day)
     date_label = target_day.strftime("%d.%m.%Y")
     if not tasks:
@@ -43,7 +51,7 @@ async def build_daily_digest_text(user_id: int, day: datetime | None = None) -> 
 
 
 async def build_weekly_digest_text(user_id: int, week_start: datetime | None = None) -> str:
-    start = week_start or datetime.now()
+    start = week_start or now_in_moscow()
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
     # Monday of current week
     start = start - timedelta(days=start.weekday())
@@ -92,11 +100,52 @@ def remove_reminder(task_id: int) -> None:
         pass
 
 
+async def restore_reminders(bot: Bot) -> None:
+    """Re-schedule future reminders after process restart (APScheduler is in-memory)."""
+    now = now_in_moscow()
+    restored = 0
+    skipped = 0
+    tasks = await get_active_tasks_for_reminders()
+    for task in tasks:
+        user_id = int(task.get("user_id") or 0)
+        task_id = int(task.get("id") or 0)
+        due_time = str(task.get("due_time") or "")
+        if not user_id or not task_id or not due_time:
+            skipped += 1
+            continue
+        if not is_allowed(user_id):
+            skipped += 1
+            continue
+        try:
+            run_time = datetime.strptime(due_time, "%d.%m.%Y %H:%M")
+        except ValueError:
+            skipped += 1
+            continue
+        if run_time <= now:
+            skipped += 1
+            continue
+        schedule_reminder(
+            bot=bot,
+            user_id=user_id,
+            task_id=task_id,
+            title=str(task.get("title") or "Без названия"),
+            run_time_str=due_time,
+        )
+        restored += 1
+    logger.info(
+        "Reminders restored from SQLite: %s scheduled, %s skipped",
+        restored,
+        skipped,
+    )
+
+
 async def send_daily_digest_batch(bot: Bot, slot: str) -> None:
     users = await get_users_for_daily_digest(slot)
-    today = datetime.now()
+    today = now_in_moscow()
     for user in users:
         user_id = int(user["user_id"])
+        if not is_allowed(user_id):
+            continue
         try:
             text = await build_daily_digest_text(user_id, today)
             await bot.send_message(chat_id=user_id, text=text)
@@ -109,6 +158,8 @@ async def send_weekly_digest_batch(bot: Bot) -> None:
     users = await get_users_for_weekly_digest()
     for user in users:
         user_id = int(user["user_id"])
+        if not is_allowed(user_id):
+            continue
         try:
             text = await build_weekly_digest_text(user_id)
             await bot.send_message(chat_id=user_id, text=text)
